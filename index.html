@@ -36,6 +36,12 @@
         <h1>Handschrift</h1>
       </div>
       <nav class="aktionen" aria-label="Aktionen">
+        <button id="regeln" class="knopf leise" type="button" title="Regelblatt für KI: so formatiert eine KI den Text">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg>
+          <span class="beschriftung">KI-Regeln</span></button>
+        <button id="trainieren" class="knopf leise" type="button" title="Schrift mit dem Apple Pencil trainieren">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/></svg>
+          <span class="beschriftung">Trainieren</span></button>
         <button id="wuerfeln" class="knopf leise" type="button" disabled title="Andere Varianten deiner Buchstaben mischen">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2"/><circle cx="15" cy="15" r="1.2"/><circle cx="15" cy="9" r="1.2"/><circle cx="9" cy="15" r="1.2"/></svg>
           <span class="beschriftung">Neu würfeln</span></button>
@@ -141,5 +147,59 @@
       </section>
     </main>
   </div>
+
+  <dialog id="training" class="fenster">
+    <header class="fenster-kopf">
+      <h2>Schrift trainieren</h2>
+      <button id="tr-schliessen" class="knopf leise rund" type="button" aria-label="Schließen">✕</button>
+    </header>
+    <div id="tr-schreiben" class="fenster-inhalt">
+      <p class="hinweis">Schreib die Vorlage mit dem Apple Pencil auf die Linie – mit etwas Abstand zwischen den Buchstaben.
+        Vorgeschlagen werden Zeichen, von denen es noch wenige Varianten gibt.</p>
+      <p class="vorlage" id="tr-vorlage" aria-live="polite"></p>
+      <canvas id="tr-canvas" class="schreibfeld" aria-label="Schreibfeld"></canvas>
+      <div class="fenster-knoepfe">
+        <label class="haken"><input id="tr-finger" type="checkbox"> Mit dem Finger</label>
+        <span class="abstand"></span>
+        <button id="tr-zurueck" class="knopf leise" type="button">Rückgängig</button>
+        <button id="tr-leeren" class="knopf leise" type="button">Leeren</button>
+        <button id="tr-anderes" class="knopf" type="button">Andere Vorlage</button>
+        <button id="tr-pruefen" class="knopf primaer" type="button">Prüfen</button>
+      </div>
+      <p id="tr-status" class="status" role="status"></p>
+    </div>
+    <div id="tr-ergebnis" class="fenster-inhalt" hidden>
+      <p id="tr-meldung" class="hinweis"></p>
+      <div id="tr-kacheln" class="kacheln"></div>
+      <div class="fenster-knoepfe">
+        <span class="abstand"></span>
+        <button id="tr-nochmal" class="knopf leise" type="button">Nochmal schreiben</button>
+        <button id="tr-speichern" class="knopf primaer" type="button">Speichern</button>
+      </div>
+    </div>
+    <footer class="fenster-fuss">
+      <span id="tr-anzahl"></span>
+      <span class="abstand"></span>
+      <button id="tr-export" class="knopf leise" type="button">Exportieren</button>
+      <button id="tr-loeschen" class="knopf leise" type="button">Alle löschen</button>
+    </footer>
+  </dialog>
+
+  <dialog id="regeln-dialog" class="fenster">
+    <header class="fenster-kopf">
+      <h2>Regelblatt für KI</h2>
+      <button id="regeln-schliessen" class="knopf leise rund" type="button" aria-label="Schließen">✕</button>
+    </header>
+    <div class="fenster-inhalt">
+      <p class="hinweis">Kopiere diese Regeln in ChatGPT, Claude &amp; Co. und lass dir deinen Text so formatieren –
+        dann bestimmt die KI selbst Papier, Platz, Überschriften, Stichpunkte, Kästen und Formeln. Die Antwort einfach hier einfügen.</p>
+      <pre id="regeln-text" class="regeln"></pre>
+      <div class="fenster-knoepfe">
+        <span id="regeln-status" class="status"></span>
+        <span class="abstand"></span>
+        <button id="regeln-kopieren" class="knopf primaer" type="button">Regeln kopieren</button>
+      </div>
+    </div>
+  </dialog>
 </body>
 </html>

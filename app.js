@@ -1,4 +1,6 @@
-import { Handschrift, goodnotesDatei, VOREINSTELLUNGEN } from "./handschrift.js";
+import { Handschrift, goodnotesDatei, VOREINSTELLUNGEN, anweisungenLesen, anweisungenAnwenden } from "./handschrift.js";
+import { trainingEinrichten, eigeneLaden, mitEigenen } from "./training.js";
+import { REGELBLATT } from "./regelblatt.js";
 
 const $ = (id) => document.getElementById(id);
 const SPEICHER = { schluessel: "handschrift-schluessel", entwurf: "handschrift-entwurf" };
@@ -73,7 +75,8 @@ async function start() {
 // --- Oberfläche -------------------------------------------------------------------------
 
 function oeffnen(daten) {
-  zustand.daten = daten;
+  zustand.basis = daten;
+  zustand.daten = mitEigenen(daten, eigeneLaden());          // selbst trainierte Varianten dazu
   const entwurf = lies(SPEICHER.entwurf, {});
   zustand.art = entwurf.art ?? zustand.art;
   zustand.format = entwurf.format ?? zustand.format;
@@ -128,6 +131,19 @@ function oeffnen(daten) {
   $("teilen").addEventListener("click", teilen);
   $("laden").addEventListener("click", herunterladen);
   $("sperren").addEventListener("click", () => { localStorage.removeItem(SPEICHER.schluessel); location.reload(); });
+  trainingEinrichten({
+    daten: () => zustand.daten,
+    zaehlerAus: () => Object.fromEntries(Object.entries(zustand.daten.glyphen).map(([c, l]) => [c, l.length])),
+    geaendert: () => { zustand.daten = mitEigenen(zustand.basis, eigeneLaden()); neuSetzen(); },
+    teilen: dateienTeilen,
+  });
+  $("regeln-text").textContent = REGELBLATT;
+  $("regeln").addEventListener("click", () => $("regeln-dialog").showModal());
+  $("regeln-schliessen").addEventListener("click", () => $("regeln-dialog").close());
+  $("regeln-kopieren").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(REGELBLATT); $("regeln-status").textContent = "Kopiert – jetzt in der KI einfügen."; }
+    catch { getSelection().selectAllChildren($("regeln-text")); $("regeln-status").textContent = "Markiert – bitte mit Kopieren übernehmen."; }
+  });
   addEventListener("resize", () => zeichnen());
   neuSetzen();
 }
@@ -170,13 +186,24 @@ function neuSetzen() {
     status("");
     return zeichnen();
   }
+  const { anweisungen } = anweisungenLesen(text);              // @papier, @platz … aus dem Text (z. B. von einer KI)
+  const vonText = Object.keys(anweisungen).length > 0;
+  if (vonText) {
+    const neu = anweisungenAnwenden(anweisungen, { art: zustand.art, format: zustand.format, optionen: zustand.optionen, titel: $("titel").value });
+    Object.assign(zustand, { art: neu.art, format: neu.format, optionen: neu.optionen });
+    if (neu.titel && neu.titel !== $("titel").value) $("titel").value = neu.titel;
+    zustand.preset = passendesPreset();
+    einstellungenZeigen();
+  }
   const hand = new Handschrift(zustand.daten, zustand.seed);
   zustand.seiten = hand.setzen(text, zustand.papier, zustand.optionen);
-  zustand.seite = Math.min(zustand.seite, zustand.seiten.length - 1);
+  zustand.seite = Math.max(0, Math.min(zustand.seite, zustand.seiten.length - 1));
+  for (const id of ["teilen", "laden"]) $(id).disabled = !zustand.seiten.length;
   const fehlend = [...hand.fehlend];
   const n = zustand.seiten.length;
   status(fehlend.length ? `Nicht in deiner Schrift vorhanden, weggelassen: ${fehlend.join(" ")}`
-    : `${n} ${n === 1 ? "Seite" : "Seiten"} · ${zustand.papier.anzeige}`, fehlend.length > 0);
+    : n ? `${n} ${n === 1 ? "Seite" : "Seiten"} · ${zustand.papier.anzeige}${vonText ? " · Einstellungen aus dem Text" : ""}`
+      : "Nichts Schreibbares im Text.", fehlend.length > 0 || !n);
   zeichnen();
 }
 
@@ -259,11 +286,14 @@ async function dateienErzeugen() {
 }
 
 async function teilen() {
-  const dateien = await dateienErzeugen();
+  if (zustand.seiten.length) dateienTeilen(await dateienErzeugen(), dateiname());
+}
+
+async function dateienTeilen(dateien, titel = "Handschrift") {
   if (navigator.canShare?.({ files: dateien })) {
     try {
-      await navigator.share({ files: dateien, title: dateiname() });
-      status("Geteilt – in der Liste „GoodNotes“ wählen.");
+      await navigator.share({ files: dateien, title: titel });
+      status("Geteilt – in der Liste die Ziel-App (z. B. GoodNotes) wählen.");
     } catch (e) {
       if (e.name !== "AbortError") status(`Teilen ging nicht: ${e.message}`, true);
     }

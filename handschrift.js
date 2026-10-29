@@ -32,7 +32,8 @@ export function textAufbereiten(text) {
   return text
     .replace(/\r/g, "")
     .replace(/^>\s?/gm, "")                               // Markdown-Zitate
-    .replace(/\*\*|__|`/g, "")                            // Fett/Code; „* “ als Stichpunkt bleibt
+    .replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g, (_, a, b) => `==${a ?? b}==`)   // fett -> unterstrichen
+    .replace(/\*\*|`/g, "")                               // Reste/Code; „* “ als Stichpunkt bleibt
     .replace(/"([^"$]*)"/g, "„$1“")                       // gerade Anführungszeichen -> deutsche
     .replace(/’/g, "'").replace(/[–—](?=\s)/g, "-");
 }
@@ -59,8 +60,46 @@ export function ueberschriftErkennen(zeile) {
   const t = zeile.trim();
   const r = /^(#{1,3})\s+(.+)$/.exec(t);
   if (r) return { text: r[2], stufe: r[1].length };
-  if (t.length <= 45 && /:$/.test(t) && !/[.!?;]/.test(t.slice(0, -1)) && t.split(/\s+/).length <= 6) return { text: t, stufe: 3 };
+  if (t.length <= 45 && /:$/.test(t) && !/[.!?;$]/.test(t.slice(0, -1)) && t.split(/\s+/).length <= 6) return { text: t, stufe: 2 };
   return null;
+}
+
+// Anweisungen am Textanfang (für KI): @papier, @format, @platz, @groesse, @wortabstand, @gliedern, @unterstreichen, @titel
+const ANWEISUNG = /^\s*@(papier|format|platz|groesse|größe|wortabstand|buchstabenabstand|gliedern|unterstreichen|titel|zeilen)\s*:\s*(.+?)\s*$/i;
+
+export function anweisungenLesen(text) {
+  const anweisungen = {};
+  const zeilen = text.split("\n");
+  let i = 0;
+  while (i < zeilen.length && (ANWEISUNG.test(zeilen[i]) || (!zeilen[i].trim() && Object.keys(anweisungen).length))) {
+    const m = ANWEISUNG.exec(zeilen[i]);
+    if (m) anweisungen[m[1].toLowerCase().replace("größe", "groesse")] = m[2];
+    i++;
+  }
+  return { anweisungen, text: Object.keys(anweisungen).length ? zeilen.slice(i).join("\n") : text };
+}
+
+// Übersetzt Anweisungen in Einstellungen der Seite (unbekannte Werte werden ignoriert).
+export function anweisungenAnwenden(anweisungen, basis) {
+  const a = anweisungen, aus = { ...basis, optionen: { ...basis.optionen } };
+  const zahl = (s) => { const n = parseFloat(String(s).replace(",", ".")); return Number.isFinite(n) ? (n > 3 ? n / 100 : n) : null; };
+  const janein = (s) => /^(an|ja|true|1|on)$/i.test(s) ? true : /^(aus|nein|false|0|off)$/i.test(s) ? false : null;
+  const papier = { kariert: "kariert-klein", "kariert-klein": "kariert-klein", liniert: "liniert-schmal", "liniert-schmal": "liniert-schmal",
+                   "liniert-gross": "liniert-gross", "liniert-groß": "liniert-gross" }[String(a.papier ?? "").toLowerCase()];
+  if (papier) aus.art = papier;
+  const format = { a4: "A4", goodnotes: "GoodNotes" }[String(a.format ?? "").toLowerCase()];
+  if (format) aus.format = format;
+  const platz = String(a.platz ?? "").toLowerCase();
+  if (VOREINSTELLUNGEN[platz]) aus.optionen = { ...VOREINSTELLUNGEN[platz] };
+  for (const [k, min, max] of [["groesse", 0.8, 1.25], ["wortabstand", 0.7, 1.5], ["buchstabenabstand", 0.7, 1.5]]) {
+    const n = a[k] != null ? zahl(a[k]) : null;
+    if (n != null) aus.optionen[k] = Math.min(max, Math.max(min, n));
+  }
+  for (const k of ["gliedern", "unterstreichen"]) if (a[k] != null && janein(a[k]) != null) aus.optionen[k] = janein(a[k]);
+  if (/^(2|jede zweite)/i.test(a.zeilen ?? "")) aus.optionen.zeilenSprung = 2;
+  if (/^(1|jede)$/i.test(a.zeilen ?? "")) aus.optionen.zeilenSprung = 1;
+  if (a.titel) aus.titel = a.titel;
+  return aus;
 }
 
 // --- Mathe ------------------------------------------------------------------------------
@@ -88,6 +127,7 @@ export function matheParsen(quelle) {
     return atom();
   };
   const atom = () => {
+    if (i >= s.length) return { t: "folge", kinder: [] };   // z. B. „x^“ am Ende: nichts anhängen
     const c = s[i];
     if (c === "\\") {
       const name = /^\\([a-zA-Z]+)/.exec(s.slice(i))?.[1] ?? "";
@@ -156,6 +196,17 @@ const ERSATZ = {
   "α": [[[0.95, -0.95], [0.7, -0.4], [0.45, -0.05], [0.15, -0.1], [0.05, -0.5], [0.3, -0.9], [0.6, -0.7], [0.75, -0.25], [0.95, 0]]],
   "∈": [[[0.75, -0.9], [0.3, -0.85], [0.05, -0.5], [0.3, -0.12], [0.75, -0.1]], [[0.1, -0.5], [0.65, -0.5]]],
   "Δ": [[[0.5, -1.8], [0.02, 0], [0.98, 0], [0.5, -1.8]]],
+  "β": [[[0.15, 0.6], [0.15, -1.4], [0.3, -1.7], [0.6, -1.65], [0.65, -1.3], [0.35, -1.0], [0.75, -0.75], [0.75, -0.25], [0.45, -0.02], [0.15, -0.15]]],
+  "γ": [[[0, -0.95], [0.25, -0.7], [0.45, -0.1], [0.4, 0.55], [0.3, 0.6], [0.35, 0.2], [0.6, -0.5], [0.8, -0.95]]],
+  "δ": [[[0.65, -1.6], [0.25, -1.55], [0.3, -1.25], [0.7, -0.8], [0.75, -0.3], [0.45, 0], [0.1, -0.25], [0.15, -0.7], [0.6, -0.9]]],
+  "ε": [[[0.7, -0.85], [0.3, -0.95], [0.1, -0.7], [0.35, -0.5], [0.1, -0.3], [0.3, -0.02], [0.75, -0.1]]],
+  "λ": [[[0.05, -1.75], [0.25, -1.6], [0.8, 0]], [[0.45, -0.75], [0.05, 0]]],
+  "μ": [[[0.1, 0.6], [0.15, -0.95], [0.15, -0.35], [0.4, -0.02], [0.7, -0.2], [0.75, -0.95], [0.78, -0.15], [0.95, 0]]],
+  "σ": [[[1.0, -0.95], [0.45, -0.95], [0.15, -0.7], [0.1, -0.3], [0.35, -0.02], [0.65, -0.15], [0.75, -0.55], [0.55, -0.95]]],
+  "φ": [[[0.45, -1.5], [0.45, 0.6]], [[0.45, -0.95], [0.15, -0.8], [0.05, -0.45], [0.3, -0.05], [0.6, -0.05], [0.85, -0.45], [0.75, -0.85], [0.45, -0.95]]],
+  "ω": [[[0.15, -0.95], [0.05, -0.4], [0.25, -0.02], [0.5, -0.35], [0.55, -0.6], [0.6, -0.35], [0.85, -0.02], [1.05, -0.4], [0.95, -0.95]]],
+  "Σ": [[[1.0, -1.8], [0.05, -1.8], [0.55, -0.9], [0.05, 0], [1.0, 0]]],
+  "Ω": [[[0.05, 0], [0.35, 0], [0.15, -0.6], [0.2, -1.4], [0.55, -1.8], [0.9, -1.4], [0.95, -0.6], [0.75, 0], [1.05, 0]]],
   "…": [[[0.1, -0.05], [0.12, -0.03]], [[0.5, -0.05], [0.52, -0.03]], [[0.9, -0.05], [0.92, -0.03]]],
 };
 
@@ -394,8 +445,8 @@ export class Handschrift {
   }
 
   // Setzt den Text auf die Linien des Papiers; liefert Seiten als Strich-Listen (pt).
-  // Phase 1 baut die Zeilen (Umbruch, Stichpunkte, Formeln), Phase 2 legt jede Zeile auf die nächste Linie,
-  // auf der sie nichts berührt – so überlappt nie etwas (Hochzahlen, Brüche, Unterstriche, Unterlängen).
+  // Phase 1 baut die Zeilen (Umbruch, Stichpunkte, Formeln, Regeln aus dem Regelblatt), Phase 2 legt jede Zeile
+  // auf die nächste Linie, auf der sie nichts berührt – so überlappt nie etwas.
   setzen(text, papier, optionen = {}) {
     const o = { ...VOREINSTELLUNGEN.normal, ...optionen };
     this.buchstabenabstand = o.buchstabenabstand;
@@ -404,70 +455,123 @@ export class Handschrift {
     const linien = papier.linien.filter((y) => y >= oben && y <= papier.hoehe - 2.2 * xh);
     const wortabst = Math.min(Math.max(this.p.wortabstand, 1.5), 3.5) * o.wortabstand;
     const breite = this.p.strichbreite_pt;
+    const skaliert = (teile, f) => teile.map(([gx, g, s, d]) => [gx * f, g, s * f, d * f]);
+    // Handgezogene Linie; „weg“ = +1: liegt nie höher als y (Unterstrich), -1: nie tiefer als y (Rahmen-Oberkante).
+    const handLinie = (x0, x1, y, zittern = 0.04, weg = 0) => {
+      const n = Math.max(2, Math.round((x1 - x0) / (1.5 * xh))), neig = this.zufall.gauss(0, 0.006);
+      const pts = Array.from({ length: n + 1 }, (_, i) => [x0 + (x1 - x0) * i / n, y + (x1 - x0) * (i / n) * neig + this.zufall.gauss(0, zittern * xh)]);
+      const ys = pts.map(([, py]) => py);
+      const dy = weg > 0 ? y - Math.min(...ys) : weg < 0 ? y - Math.max(...ys) : 0;
+      return pts.map(([px, py]) => [px, py + dy]);
+    };
 
     // --- Phase 1: Zeilen bauen ---
-    const zeilen = [];                                   // { frei, teile: [{x, teile, drift, neigung}], unterstrich }
-    let frei = 0, vorher = null;                         // vorher: "text" | "stichpunkt" | "ueberschrift"
-    let quelle = textAufbereiten(text);
+    const zeilen = [];                                   // { frei, teile, linien, kasten, umbruch }
+    let frei = 0, vorher = null, kasten = null, kastenNr = 0, idNr = 0;
+    let quelle = anweisungenLesen(textAufbereiten(text)).text;
     if (o.gliedern) quelle = gliedern(quelle);
-    for (const roh of quelle.split("\n")) {
+    for (let roh of quelle.split("\n")) {
+      const befehl = /^\s*\[(leer|seite|kasten|\/kasten)(?:\s+(\d{1,2}))?\]\s*$/i.exec(roh);
+      if (befehl) {
+        const art = befehl[1].toLowerCase();
+        if (art === "leer") frei += Math.min(20, Number(befehl[2] ?? 1));
+        if (art === "seite") { zeilen.push({ umbruch: true }); frei = 0; vorher = null; }
+        if (art === "kasten") { kasten = ++kastenNr; if (vorher) frei = Math.max(frei, 1); vorher = null; }
+        if (art === "/kasten" && kasten) { kasten = null; frei = Math.max(frei, 1); vorher = null; }
+        continue;
+      }
       if (!roh.trim()) { frei += 1; vorher = null; continue; }   // Leerzeile = eine Linie frei
-      const ue = ueberschriftErkennen(roh);
-      const sp = ue ? null : stichpunktErkennen(roh);
+      let ausrichtung = null;
+      const ausr = /^\s*\[(mitte|rechts)\]\s*(.*)$/i.exec(roh);
+      if (ausr) { ausrichtung = ausr[1].toLowerCase(); roh = ausr[2]; if (!roh.trim()) continue; }
+      if (/^\s*([-*_])\1{2,}\s*$/.test(roh)) {           // --- Trennlinie
+        const y = -0.5 * xh;
+        zeilen.push({ frei, kasten, teile: [], linien: [handLinie(papier.x_links, papier.x_rechts, y, 0.03)] });
+        frei = 0; vorher = "linie";
+        continue;
+      }
+      const formelZeile = /^\s*\$\$(.+)\$\$\s*$/.exec(roh);
+      if (formelZeile) { roh = `$${formelZeile[1]}$`; ausrichtung = ausrichtung ?? "mitte"; }
+      const ue = formelZeile ? null : ueberschriftErkennen(roh);
+      const sp = ue || formelZeile ? null : stichpunktErkennen(roh);
       if (vorher && !frei && ((o.abstandStichpunkte && sp && vorher === "stichpunkt") ||
                               (o.abstandUeberschrift && (ue || vorher === "ueberschrift")))) frei += 1;
-      const start = papier.x_links + this.zufall.uniform(-1.0, 1.5);
-      let zeile = { frei, teile: [], unterstrich: null };
+      const rand = kasten ? 1.0 * xh : 0;                // Text im Kasten etwas eingerückt
+      const linksRand = papier.x_links + rand, rechtsRand = papier.x_rechts - rand;
+      const start = linksRand + this.zufall.uniform(-1.0, 1.5);
+      const groesse = ue && ue.stufe === 1 ? 1.2 : 1.0;   // Hauptüberschrift etwas größer
+      let zeile = { frei, kasten, teile: [], linien: [] };
       frei = 0;
-      let x = start, links = start, drift = 0.0, zeilenAnfang = x, xEnde = x;
-      const unterstreichen = () => {
-        if (!(ue && o.unterstreichen)) return;
-        const x0 = zeilenAnfang - 0.2 * xh, x1 = xEnde + 0.3 * xh, n = Math.max(2, Math.round((x1 - x0) / (1.5 * xh)));
-        const neig = this.zufall.gauss(0, 0.01);
-        zeile.unterstrich = Array.from({ length: n + 1 }, (_, i) => [x0 + (x1 - x0) * i / n,
-          0.3 * xh + (x1 - x0) * (i / n) * neig + this.zufall.gauss(0, 0.04 * xh)]);
+      let x = start, links = start, drift = 0.0, zeilenAnfang = x, xEnde = x, markiert = false, markStart = null;
+      const unterkante = () => Math.max(0.3, (zeile.tief ?? 0) + 0.2) * xh + breite + 0.6;   // unter die tiefste Unterlänge
+      const markEnde = (bis) => {                        // ==Markierung== wird unterstrichen
+        if (markStart !== null) zeile.linien.push(handLinie(markStart - 0.15 * xh, bis + 0.15 * xh, unterkante(), 0.04, 1));
+        markStart = null;
+      };
+      const zeileFertig = () => {
+        markEnde(xEnde);
+        if (ue && o.unterstreichen && ue.stufe <= 2) zeile.linien.push(handLinie(zeilenAnfang - 0.2 * xh, xEnde + 0.3 * xh, unterkante(), 0.04, 1));
+        if (ausrichtung) {                               // [mitte] / [rechts] / $$…$$
+          const frei2 = rechtsRand - (xEnde - zeilenAnfang) - linksRand;
+          const dx = (ausrichtung === "mitte" ? frei2 / 2 : frei2) - (zeilenAnfang - linksRand);
+          for (const t of zeile.teile) t.x += dx;
+          zeile.linien = zeile.linien.map((l) => l.map(([px, py]) => [px + dx, py]));
+        }
+        zeilen.push(zeile);
       };
       if (sp) {                                          // Spiegelstrich davor, Folgezeilen bündig eingerückt
         x = start + sp.ebene * 3.2 * xh;
         const [teile, w] = this.aufzaehlungszeichen(sp.marke);
-        zeile.teile.push({ x, teile, drift: 0, neigung: this.p.neigung_tan });
+        zeile.teile.push({ x, teile, drift: 0, neigung: this.p.neigung_tan, id: ++idNr });
         x = links = zeilenAnfang = xEnde = x + (w + 1.4) * xh;
       }
       const absatz = ue ? ue.text : sp ? sp.text : roh.trim();
-      for (const tok of absatz.match(/\$[^$]+\$\S*|\S+/g) || []) {
-        const [teile, w] = this.wortOderFormel(tok);
-        if (!teile.length) continue;
-        if (x > links && x + w * xh > papier.x_rechts) {   // Umbruch
-          unterstreichen();
-          zeilen.push(zeile);
-          zeile = { frei: 0, teile: [], unterstrich: null };
-          x = links = sp ? links : papier.x_links + this.zufall.uniform(-1.0, 1.5);
-          zeilenAnfang = x;
-          drift = 0.0;
+      const tokens = absatz.match(/\$[^$]+\$\S*|\S+/g) || [];
+      for (let tok of tokens) {
+        let markiertHier = markiert;
+        if (tok.startsWith("==") && tok.length > 2) { markiert = markiertHier = true; tok = tok.slice(2); }
+        const ende = /==([.,;:!?)]*)$/.exec(tok);
+        if (ende && markiert) { tok = tok.slice(0, ende.index) + ende[1]; markiert = false; }
+        if (!tok) continue;
+        let stuecke = [this.wortOderFormel(tok)];
+        const platz = (rechtsRand - links) / xh / groesse;
+        if (stuecke[0][1] > platz) stuecke = this.passendMachen(tok, stuecke[0], platz);
+        for (let [teile, w] of stuecke) {
+          if (!teile.length) continue;
+          if (groesse !== 1) { teile = skaliert(teile, groesse); w *= groesse; }
+          if (x > links && x + w * xh > rechtsRand) {    // Umbruch
+            zeileFertig();
+            zeile = { frei: 0, kasten, teile: [], linien: [] };
+            x = links = sp ? links : linksRand + this.zufall.uniform(-1.0, 1.5);
+            zeilenAnfang = x;
+            drift = 0.0;
+          }
+          const neigung = this.p.neigung_tan + this.zufall.gauss(0, 0.03);
+          drift = Math.max(-0.08, Math.min(0.08, drift + this.zufall.gauss(0, 0.03)));   // bleibt auf der Linie
+          zeile.teile.push({ x, teile, drift, neigung, id: ++idNr });
+          zeile.tief = Math.max(zeile.tief ?? 0, Handschrift.boxAus(teile, w).unten + Math.abs(drift));
+          if (markiertHier && markStart === null) markStart = x;
+          if (!markiertHier) markEnde(xEnde);
+          xEnde = x + w * xh;
+          x += (w + Math.max(1.0, this.zufall.gauss(wortabst, 0.35))) * xh;
         }
-        const neigung = this.p.neigung_tan + this.zufall.gauss(0, 0.03);
-        drift = Math.max(-0.08, Math.min(0.08, drift + this.zufall.gauss(0, 0.03)));   // bleibt auf der Linie
-        zeile.teile.push({ x, teile, drift, neigung });
-        xEnde = x + w * xh;
-        x += (w + Math.max(1.0, this.zufall.gauss(wortabst, 0.35))) * xh;
       }
-      unterstreichen();
-      zeilen.push(zeile);
+      zeileFertig();
       vorher = ue ? "ueberschrift" : sp ? "stichpunkt" : "text";
     }
 
     // --- Phase 2: auf Linien legen, ohne dass sich etwas berührt ---
     const zeichneZeile = (z, y) => {
       const out = [];
-      for (const { x, teile, drift, neigung } of z.teile) {
+      for (const { x, teile, drift, neigung, id } of z.teile) {
         for (const [gx, g, skala, dy] of teile) {
           const s = xh * skala, basis = y + (drift + dy) * xh;
           for (const strich of g.striche) {
-            out.push({ punkte: strich.map(([px, py]) => [x + gx * xh + px * s - py * s * neigung, basis + py * s]), breite });
+            out.push({ punkte: strich.map(([px, py]) => [x + gx * xh + px * s - py * s * neigung, basis + py * s]), breite, id, grund: y });
           }
         }
       }
-      if (z.unterstrich) out.push({ punkte: z.unterstrich.map(([px, py]) => [px, y + py]), breite });
+      (z.linien || []).forEach((l, i) => out.push({ punkte: l.map(([px, py]) => [px, y + py]), breite, id: `l${zeilen.indexOf(z)}-${i}` }));
       return out;
     };
     const RASTER = 1.2;                                  // Breite der Prüfstreifen in pt
@@ -500,24 +604,76 @@ export class Handschrift {
     };
 
     const seiten = [];
-    let seite = [], darueber = [], k = -1;
+    let seite = [], darueber = [], k = -1, rahmen = null;      // rahmen: offener [kasten] auf dieser Seite
+    const rahmenSchliessen = () => {                     // handgezeichnetes Rechteck um den Kasten
+      if (!rahmen) return;
+      const pad = 0.55 * xh, x0 = papier.x_links - 0.35 * xh, x1 = papier.x_rechts + 0.35 * xh;
+      const y0 = rahmen.min - pad, y1 = rahmen.max + pad;
+      const striche = [
+        { punkte: handLinie(x0, x1, y0, 0.03, -1), breite, id: "rahmen" },
+        { punkte: handLinie(x0, x1, y1, 0.03, 1), breite, id: "rahmen" },
+        { punkte: [[x0, y0], [x0 + this.zufall.gauss(0, 0.3), (y0 + y1) / 2], [x0 + this.zufall.gauss(0, 0.3), y1]], breite, id: "rahmen" },
+        { punkte: [[x1, y0], [x1 + this.zufall.gauss(0, 0.3), (y0 + y1) / 2], [x1 + this.zufall.gauss(0, 0.3), y1]], breite, id: "rahmen" },
+      ];
+      seite.push(...striche);
+      darueber = [profil(striche, true), ...darueber].slice(0, 2);
+      rahmen = null;
+    };
+    const neueSeite = () => {
+      rahmenSchliessen();
+      seiten.push(seite);
+      seite = []; darueber = []; k = -1;
+    };
     for (const z of zeilen) {
-      let ziel = k < 0 ? 0 : k + o.zeilenSprung * (1 + z.frei);
+      if (z.umbruch) { if (seite.length) neueSeite(); continue; }
+      if (rahmen && rahmen.nr !== z.kasten) rahmenSchliessen();
+      let ziel = k < 0 ? 0 : k + o.zeilenSprung + z.frei;     // freie Linien zählen einfach, auch bei „jede zweite“
       for (;;) {
-        if (ziel >= linien.length) {                     // neue Seite
-          seiten.push(seite);
-          seite = []; darueber = []; k = -1; ziel = 0;
-        }
+        if (ziel >= linien.length) { neueSeite(); ziel = 0; }
         const striche = zeichneZeile(z, linien[ziel]);
-        if (darueber.length && beruehrt(profil(striche, false), darueber) && ziel + 1 < linien.length) { ziel += 1; continue; }
+        let pruef = striche;
+        if (z.kasten && (!rahmen || rahmen.nr !== z.kasten)) {   // erste Kastenzeile: künftige Oberkante mitprüfen
+          const lo = Math.min(linien[ziel] - this.versal * xh, ...striche.flatMap((s) => s.punkte.map(([, py]) => py)));
+          pruef = striche.concat({ punkte: [[papier.x_links - 0.5 * xh, lo - 0.55 * xh - 0.2 * xh], [papier.x_rechts + 0.5 * xh, lo - 0.55 * xh - 0.2 * xh]], breite });
+        }
+        // Lesereihenfolge: nichts darf über die Grundlinie der vorigen Zeile ragen (sonst wirkt es wie dieselbe Zeile)
+        const ueberGrundlinie = k >= 0 && Math.min(...pruef.flatMap((s) => s.punkte.map(([, py]) => py))) < linien[k] + 0.2 * xh;
+        if ((darueber.length && beruehrt(profil(pruef, false), darueber)) || ueberGrundlinie) {
+          if (ziel + 1 < linien.length) { ziel += 1; continue; }
+          neueSeite(); ziel = 0; continue;               // passt auf dieser Seite nirgends mehr
+        }
         seite.push(...striche);
         darueber = [profil(striche, true), darueber[0]].filter(Boolean);
+        if (z.kasten) {
+          const ys = striche.flatMap((s) => s.punkte.map(([, py]) => py));
+          const lo = Math.min(linien[ziel] - this.versal * xh, ...ys), hi = Math.max(linien[ziel] + 0.6 * xh, ...ys);
+          rahmen = rahmen ? { ...rahmen, min: Math.min(rahmen.min, lo), max: Math.max(rahmen.max, hi) } : { nr: z.kasten, min: lo, max: hi };
+        }
         k = ziel;
         break;
       }
     }
+    rahmenSchliessen();
     if (seite.length) seiten.push(seite);
     return seiten;
+  }
+
+  // Zu breit für die Zeile: Wörter mit Trennstrich teilen, Formeln verkleinern.
+  passendMachen(tok, [teile, w], platz) {
+    if (tok.startsWith("$") || MATHE_ERKENNEN.test(tok)) {
+      const f = platz / w;
+      return [[teile.map(([gx, g, s, d]) => [gx * f, g, s * f, d * f]), w * f]];
+    }
+    const stuecke = [];
+    let rest = [...tok];
+    while (rest.length) {
+      let n = rest.length;
+      while (n > 1 && this.wort(rest.slice(0, n).join("") + (n < rest.length ? "-" : ""))[1] > platz) n--;
+      const teil = rest.slice(0, n).join("") + (n < rest.length ? "-" : "");
+      stuecke.push(this.wort(teil));
+      rest = rest.slice(n);
+    }
+    return stuecke;
   }
 }
 

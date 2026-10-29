@@ -172,6 +172,38 @@ textarea { flex: 1; min-height: 300px; resize: vertical; line-height: 1.6; }
 .status { margin: 0; min-height: 1.5em; color: var(--gedaempft); font-size: 14px; text-align: center; }
 .status.warnung { color: var(--fehler); }
 
+/* --- Fenster (Training, Regelblatt) --- */
+.fenster {
+  width: min(980px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 1px solid var(--rand);
+  border-radius: 20px; background: var(--karte); color: var(--tinte); box-shadow: 0 30px 80px rgba(0, 0, 0, .35);
+}
+.fenster::backdrop { background: rgba(20, 18, 12, .45); backdrop-filter: blur(3px); }
+.fenster-kopf, .fenster-fuss { display: flex; align-items: center; gap: 10px; padding: 14px 18px; }
+.fenster-kopf { border-bottom: 1px solid var(--rand); justify-content: space-between; }
+.fenster-kopf h2 { margin: 0; font-family: var(--serif); font-size: 22px; }
+.fenster-fuss { border-top: 1px solid var(--rand); color: var(--gedaempft); font-size: 14px; }
+.fenster-inhalt { padding: 16px 18px; display: grid; gap: 12px; }
+.fenster-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.abstand { flex: 1; }
+.hinweis { margin: 0; color: var(--gedaempft); }
+.vorlage { margin: 0; white-space: pre-line; line-height: 1.25; text-align: center; font-family: var(--serif); font-size: clamp(28px, 5vw, 44px); letter-spacing: .06em; }
+.schreibfeld {
+  width: 100%; height: 300px; border-radius: 14px; border: 1px solid var(--rand); background: #fffefb;
+  touch-action: none; cursor: crosshair; display: block;
+}
+.kacheln { display: flex; flex-wrap: wrap; gap: 10px; }
+.tr-kachel {
+  display: grid; justify-items: center; gap: 2px; padding: 6px 6px 4px; border: 2px solid var(--akzent); border-radius: 12px;
+  background: #fffefb; color: #1d2230; cursor: pointer; transition: opacity .15s, border-color .15s;
+}
+.tr-kachel canvas { width: 60px; height: 60px; }
+.tr-kachel span { font-weight: 700; }
+.tr-kachel[aria-pressed=false] { opacity: .35; border-color: var(--rand); border-style: dashed; }
+.regeln {
+  margin: 0; max-height: 52dvh; overflow: auto; white-space: pre-wrap; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--grund); border: 1px solid var(--rand); border-radius: 12px; padding: 14px;
+}
+
 .tipps { color: var(--gedaempft); font-size: 15px; border-top: 1px solid var(--rand); padding-top: 10px; }
 .tipps summary { cursor: pointer; font-weight: 600; }
 .tipps dl { margin: 10px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: baseline; }
