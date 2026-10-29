@@ -1,0 +1,251 @@
+import { Handschrift, goodnotesDatei } from "./handschrift.js";
+
+const $ = (id) => document.getElementById(id);
+const SPEICHER = { schluessel: "handschrift-schluessel", entwurf: "handschrift-entwurf" };
+const TINTE = "#15181f";
+
+const zustand = { daten: null, art: "kariert-klein", format: "A4", seed: neuerSeed(), seiten: [], seite: 0, papier: null };
+const bilder = new Map();                                // Papierhintergründe, einmal geladen
+
+function neuerSeed() { return Math.floor(Math.random() * 2 ** 31); }
+
+function lies(schluessel, ersatz) {
+  try { return JSON.parse(localStorage.getItem(schluessel)) ?? ersatz; } catch { return ersatz; }
+}
+function schreib(schluessel, wert) {
+  try { localStorage.setItem(schluessel, JSON.stringify(wert)); } catch { /* privater Modus: egal */ }
+}
+
+// --- Entsperren -------------------------------------------------------------------------
+
+async function datenLaden() {
+  const antwort = await fetch("daten.bin", { cache: "no-cache" });
+  if (!antwort.ok) throw new Error("daten.bin fehlt");
+  const roh = new Uint8Array(await antwort.arrayBuffer());
+  return { salz: roh.slice(4, 20), iv: roh.slice(20, 32), chiffre: roh.slice(32) };
+}
+
+async function schluesselAusPasswort(passwort, salz) {
+  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passwort), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: salz, iterations: 250000, hash: "SHA-256" },
+    material, { name: "AES-GCM", length: 256 }, true, ["decrypt"]);
+}
+
+async function entschluesseln(schluessel, paket) {
+  const klar = await crypto.subtle.decrypt({ name: "AES-GCM", iv: paket.iv }, schluessel, paket.chiffre);
+  return JSON.parse(new TextDecoder().decode(klar));
+}
+
+async function start() {
+  const paket = await datenLaden();
+  const gemerkt = lies(SPEICHER.schluessel, null);
+  if (gemerkt) {
+    try {
+      const roh = Uint8Array.from(atob(gemerkt), (c) => c.charCodeAt(0));
+      const schluessel = await crypto.subtle.importKey("raw", roh, "AES-GCM", false, ["decrypt"]);
+      return oeffnen(await entschluesseln(schluessel, paket));
+    } catch { localStorage.removeItem(SPEICHER.schluessel); }
+  }
+  $("sperre-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const knopf = e.submitter;
+    knopf.disabled = true;
+    $("sperre-fehler").textContent = "";
+    try {
+      const schluessel = await schluesselAusPasswort($("passwort").value, paket.salz);
+      const daten = await entschluesseln(schluessel, paket);
+      if ($("merken").checked) {
+        const roh = new Uint8Array(await crypto.subtle.exportKey("raw", schluessel));
+        schreib(SPEICHER.schluessel, btoa(String.fromCharCode(...roh)));
+      }
+      oeffnen(daten);
+    } catch {
+      $("sperre-fehler").textContent = "Das Passwort stimmt nicht.";
+      $("passwort").select();
+    } finally {
+      knopf.disabled = false;
+    }
+  });
+  $("passwort").focus();
+}
+
+// --- Oberfläche -------------------------------------------------------------------------
+
+function oeffnen(daten) {
+  zustand.daten = daten;
+  const entwurf = lies(SPEICHER.entwurf, {});
+  zustand.art = entwurf.art ?? zustand.art;
+  zustand.format = entwurf.format ?? zustand.format;
+  $("titel").value = entwurf.titel ?? "";
+  $("text").value = entwurf.text ?? "";
+  $("sperre").hidden = true;
+  $("app").hidden = false;
+
+  for (const gruppe of document.querySelectorAll(".umschalter")) {
+    gruppe.addEventListener("click", (e) => {
+      const knopf = e.target.closest("button");
+      if (!knopf) return;
+      zustand[gruppe.dataset.gruppe] = knopf.dataset.wert;
+      umschalterZeigen();
+      neuSetzen();
+    });
+  }
+  umschalterZeigen();
+
+  let warten;
+  const beimTippen = () => { clearTimeout(warten); warten = setTimeout(neuSetzen, 350); };
+  $("text").addEventListener("input", beimTippen);
+  $("titel").addEventListener("input", entwurfSichern);
+  $("wuerfeln").addEventListener("click", () => { zustand.seed = neuerSeed(); neuSetzen(); });
+  $("zurueck").addEventListener("click", () => blaettern(-1));
+  $("weiter").addEventListener("click", () => blaettern(1));
+  $("teilen").addEventListener("click", teilen);
+  $("laden").addEventListener("click", herunterladen);
+  $("sperren").addEventListener("click", () => { localStorage.removeItem(SPEICHER.schluessel); location.reload(); });
+  addEventListener("resize", () => zeichnen());
+  neuSetzen();
+}
+
+function umschalterZeigen() {
+  for (const gruppe of document.querySelectorAll(".umschalter")) {
+    for (const knopf of gruppe.querySelectorAll("button")) {
+      knopf.setAttribute("aria-checked", String(knopf.dataset.wert === zustand[gruppe.dataset.gruppe]));
+    }
+  }
+  const name = `${zustand.art}_${zustand.format}`;
+  zustand.papier = zustand.daten.papiere.find((p) => p.name === name) ?? zustand.daten.papiere[0];
+}
+
+function entwurfSichern() {
+  schreib(SPEICHER.entwurf, { text: $("text").value, titel: $("titel").value, art: zustand.art, format: zustand.format });
+}
+
+function neuSetzen() {
+  entwurfSichern();
+  const text = $("text").value;
+  const hat = text.trim().length > 0;
+  for (const id of ["teilen", "laden", "wuerfeln"]) $(id).disabled = !hat;
+  $("leer").hidden = hat;
+  if (!hat) {
+    zustand.seiten = [];
+    status("");
+    return zeichnen();
+  }
+  const hand = new Handschrift(zustand.daten, zustand.seed);
+  zustand.seiten = hand.setzen(text, zustand.papier);
+  zustand.seite = Math.min(zustand.seite, zustand.seiten.length - 1);
+  const fehlend = [...hand.fehlend];
+  const n = zustand.seiten.length;
+  status(fehlend.length ? `Nicht in deiner Schrift vorhanden, weggelassen: ${fehlend.join(" ")}`
+    : `${n} ${n === 1 ? "Seite" : "Seiten"} · ${zustand.papier.anzeige}`, fehlend.length > 0);
+  zeichnen();
+}
+
+function status(text, warnung = false) {
+  $("status").textContent = text;
+  $("status").classList.toggle("warnung", warnung);
+}
+
+function blaettern(schritt) {
+  const n = zustand.seiten.length;
+  if (n) { zustand.seite = (zustand.seite + schritt + n) % n; zeichnen(); }
+}
+
+function papierBild(papier) {
+  if (!bilder.has(papier.name)) {
+    const bild = new Image();
+    bild.src = `data:image/png;base64,${papier.bild}`;
+    bild.onload = () => zeichnen();
+    bilder.set(papier.name, bild);
+  }
+  return bilder.get(papier.name);
+}
+
+function seiteMalen(ctx, papier, striche, skala) {
+  const bild = papierBild(papier);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, papier.breite * skala, papier.hoehe * skala);
+  if (bild.complete && bild.naturalWidth) ctx.drawImage(bild, 0, 0, papier.breite * skala, papier.hoehe * skala);
+  ctx.strokeStyle = ctx.fillStyle = TINTE;
+  ctx.lineCap = ctx.lineJoin = "round";
+  for (const s of striche) {
+    ctx.lineWidth = Math.max(1, s.breite * skala);
+    ctx.beginPath();
+    s.punkte.forEach(([x, y], i) => (i ? ctx.lineTo(x * skala, y * skala) : ctx.moveTo(x * skala, y * skala)));
+    if (s.punkte.length === 1) ctx.lineTo(s.punkte[0][0] * skala + 0.01, s.punkte[0][1] * skala);
+    ctx.stroke();
+  }
+}
+
+function zeichnen() {
+  const papier = zustand.papier;
+  if (!papier) return;
+  const canvas = $("blatt");
+  const breite = $("blatt-rahmen").clientWidth;
+  const dpr = window.devicePixelRatio || 1;
+  const skala = (breite / papier.breite) * dpr;
+  canvas.width = Math.round(papier.breite * skala);
+  canvas.height = Math.round(papier.hoehe * skala);
+  seiteMalen(canvas.getContext("2d"), papier, zustand.seiten[zustand.seite] ?? [], skala);
+  const n = zustand.seiten.length;
+  $("seiten").hidden = n < 2;
+  $("seitenzahl").textContent = `Seite ${zustand.seite + 1} von ${n}`;
+}
+
+// --- Dateien ----------------------------------------------------------------------------
+
+async function vorschauJpeg(papier, striche) {
+  const c = document.createElement("canvas");
+  c.width = Math.round(papier.breite * 0.5);
+  c.height = Math.round(papier.hoehe * 0.5);
+  seiteMalen(c.getContext("2d"), papier, striche, 0.5);
+  const blob = await new Promise((fertig) => c.toBlob(fertig, "image/jpeg", 0.8));
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+function dateiname() {
+  const roh = $("titel").value.trim() || $("text").value.trim().split(/\s+/).slice(0, 5).join(" ") || "Handschrift";
+  return roh.replace(/[\\/:*?"<>|]+/g, "").slice(0, 60).trim() || "Handschrift";
+}
+
+async function dateienErzeugen() {
+  const name = dateiname(), n = zustand.seiten.length, dateien = [];
+  for (let i = 0; i < n; i++) {
+    const striche = zustand.seiten[i];
+    const inhalt = goodnotesDatei(striche, zustand.papier, await vorschauJpeg(zustand.papier, striche));
+    const datei = n === 1 ? `${name}.goodnotes` : `${name} – Seite ${i + 1}.goodnotes`;
+    dateien.push(new File([inhalt], datei, { type: "application/octet-stream" }));
+  }
+  return dateien;
+}
+
+async function teilen() {
+  const dateien = await dateienErzeugen();
+  if (navigator.canShare?.({ files: dateien })) {
+    try {
+      await navigator.share({ files: dateien, title: dateiname() });
+      status("Geteilt – in der Liste „GoodNotes“ wählen.");
+    } catch (e) {
+      if (e.name !== "AbortError") status(`Teilen ging nicht: ${e.message}`, true);
+    }
+    return;
+  }
+  speichern(dateien);
+  status("Teilen wird hier nicht unterstützt – Datei wurde heruntergeladen.");
+}
+
+async function herunterladen() {
+  speichern(await dateienErzeugen());
+}
+
+function speichern(dateien) {
+  dateien.forEach((datei, i) => setTimeout(() => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(datei);
+    a.download = datei.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }, i * 400));
+}
+
+start().catch((fehler) => { $("sperre-fehler").textContent = `Laden fehlgeschlagen: ${fehler.message}`; });

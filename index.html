@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Handschrift</title>
+  <meta name="description" content="Getippter Text in meiner Handschrift – als GoodNotes-Datei.">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#f4efe4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#15171c" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Handschrift">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="icon" href="icon-180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="sperre" class="sperre">
+    <form id="sperre-form" class="sperre-karte" autocomplete="off">
+      <img src="icon-180.png" alt="" class="sperre-logo" width="72" height="72">
+      <h1>Handschrift</h1>
+      <p>Diese Seite schreibt Text in meiner Handschrift. Bitte Passwort eingeben.</p>
+      <input id="passwort" type="password" placeholder="Passwort" autocomplete="current-password" required>
+      <label class="haken"><input id="merken" type="checkbox" checked> Auf diesem Gerät merken</label>
+      <button type="submit" class="knopf primaer">Öffnen</button>
+      <p id="sperre-fehler" class="fehler" role="alert"></p>
+    </form>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <header class="kopf">
+      <div class="marke">
+        <img src="icon-180.png" alt="" width="40" height="40">
+        <div>
+          <h1>Handschrift</h1>
+          <p>Text rein – meine Schrift raus, als echte GoodNotes-Tinte.</p>
+        </div>
+      </div>
+      <button id="sperren" class="knopf leise klein" type="button" title="Gespeichertes Passwort von diesem Gerät entfernen">Sperren</button>
+    </header>
+
+    <main class="werkbank">
+      <section class="eingabe karte" aria-label="Text und Einstellungen">
+        <div class="feld">
+          <span class="etikett" id="papier-etikett">Papier</span>
+          <div class="umschalter" role="radiogroup" aria-labelledby="papier-etikett" data-gruppe="art">
+            <button type="button" role="radio" data-wert="kariert-klein">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18M3 13h18M3 18h18M8 3v18M13 3v18M18 3v18"/></svg>Kariert</button>
+            <button type="button" role="radio" data-wert="liniert-schmal">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 11h18M3 15h18M3 19h18"/></svg>Liniert schmal</button>
+            <button type="button" role="radio" data-wert="liniert-gross">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18M3 14h18M3 20h18"/></svg>Liniert groß</button>
+          </div>
+        </div>
+        <div class="feld">
+          <span class="etikett" id="format-etikett">Format</span>
+          <div class="umschalter" role="radiogroup" aria-labelledby="format-etikett" data-gruppe="format">
+            <button type="button" role="radio" data-wert="A4">A4</button>
+            <button type="button" role="radio" data-wert="GoodNotes">GoodNotes</button>
+          </div>
+        </div>
+        <div class="feld">
+          <label class="etikett" for="titel">Dateiname</label>
+          <input id="titel" type="text" placeholder="z. B. Sozialkunde Zusammenfassung" enterkeyhint="next">
+        </div>
+        <div class="feld wachsend">
+          <label class="etikett" for="text">Text</label>
+          <textarea id="text" spellcheck="true" placeholder="Text hier einfügen oder tippen …"></textarea>
+        </div>
+        <details class="tipps">
+          <summary>Tipps zum Format</summary>
+          <ul>
+            <li><code>- Punkt</code> am Zeilenanfang wird ein Stichpunkt mit Spiegelstrich, <code>* Punkt</code> einer mit Punkt.</li>
+            <li>Zwei Leerzeichen davor rücken einen Unterpunkt ein; <code>1.</code> nummeriert.</li>
+            <li>Eine Leerzeile lässt auf dem Papier eine Linie frei.</li>
+            <li>„Neu würfeln“ mischt andere Varianten deiner Buchstaben.</li>
+          </ul>
+        </details>
+      </section>
+
+      <section class="ausgabe" aria-label="Vorschau">
+        <div class="blatt-rahmen" id="blatt-rahmen">
+          <canvas id="blatt" aria-label="Vorschau der Seite"></canvas>
+          <p class="leer" id="leer">Die Vorschau erscheint, sobald du Text eingibst.</p>
+        </div>
+        <div class="seiten" id="seiten" hidden>
+          <button id="zurueck" class="knopf leise rund" type="button" aria-label="Vorige Seite">‹</button>
+          <span id="seitenzahl">Seite 1 von 1</span>
+          <button id="weiter" class="knopf leise rund" type="button" aria-label="Nächste Seite">›</button>
+        </div>
+        <div class="aktionen">
+          <button id="teilen" class="knopf primaer" type="button" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+            In GoodNotes öffnen</button>
+          <button id="laden" class="knopf" type="button" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M5 21h14"/></svg>
+            Herunterladen</button>
+          <button id="wuerfeln" class="knopf leise" type="button" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2"/><circle cx="15" cy="15" r="1.2"/><circle cx="15" cy="9" r="1.2"/><circle cx="9" cy="15" r="1.2"/></svg>
+            Neu würfeln</button>
+        </div>
+        <p id="status" class="status" role="status"></p>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
