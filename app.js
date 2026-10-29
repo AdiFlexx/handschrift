@@ -4,7 +4,8 @@ const $ = (id) => document.getElementById(id);
 const SPEICHER = { schluessel: "handschrift-schluessel", entwurf: "handschrift-entwurf" };
 const TINTE = "#15181f";
 
-const zustand = { daten: null, art: "kariert-klein", format: "A4", seed: neuerSeed(), seiten: [], seite: 0, papier: null };
+const zustand = { daten: null, art: "kariert-klein", format: "A4", abstand: true, unterstreichen: true,
+                  seed: neuerSeed(), seiten: [], seite: 0, papier: null };
 const bilder = new Map();                                // Papierhintergründe, einmal geladen
 
 function neuerSeed() { return Math.floor(Math.random() * 2 ** 31); }
@@ -76,6 +77,12 @@ function oeffnen(daten) {
   const entwurf = lies(SPEICHER.entwurf, {});
   zustand.art = entwurf.art ?? zustand.art;
   zustand.format = entwurf.format ?? zustand.format;
+  zustand.abstand = entwurf.abstand ?? zustand.abstand;
+  zustand.unterstreichen = entwurf.unterstreichen ?? zustand.unterstreichen;
+  for (const [id, feld] of [["opt-abstand", "abstand"], ["opt-unterstreichen", "unterstreichen"]]) {
+    $(id).checked = zustand[feld];
+    $(id).addEventListener("change", () => { zustand[feld] = $(id).checked; neuSetzen(); });
+  }
   $("titel").value = entwurf.titel ?? "";
   $("text").value = entwurf.text ?? "";
   $("sperre").hidden = true;
@@ -117,7 +124,8 @@ function umschalterZeigen() {
 }
 
 function entwurfSichern() {
-  schreib(SPEICHER.entwurf, { text: $("text").value, titel: $("titel").value, art: zustand.art, format: zustand.format });
+  schreib(SPEICHER.entwurf, { text: $("text").value, titel: $("titel").value, art: zustand.art, format: zustand.format,
+                              abstand: zustand.abstand, unterstreichen: zustand.unterstreichen });
 }
 
 function neuSetzen() {
@@ -132,7 +140,7 @@ function neuSetzen() {
     return zeichnen();
   }
   const hand = new Handschrift(zustand.daten, zustand.seed);
-  zustand.seiten = hand.setzen(text, zustand.papier);
+  zustand.seiten = hand.setzen(text, zustand.papier, { abstand: zustand.abstand, unterstreichen: zustand.unterstreichen });
   zustand.seite = Math.min(zustand.seite, zustand.seiten.length - 1);
   const fehlend = [...hand.fehlend];
   const n = zustand.seiten.length;

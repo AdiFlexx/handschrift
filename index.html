@@ -30,53 +30,67 @@
   </div>
 
   <div id="app" class="app" hidden>
-    <header class="kopf">
+    <header class="leiste">
       <div class="marke">
-        <img src="icon-180.png" alt="" width="40" height="40">
-        <div>
-          <h1>Handschrift</h1>
-          <p>Text rein – meine Schrift raus, als echte GoodNotes-Tinte.</p>
-        </div>
+        <img src="icon-180.png" alt="" width="34" height="34">
+        <h1>Handschrift</h1>
       </div>
-      <button id="sperren" class="knopf leise klein" type="button" title="Gespeichertes Passwort von diesem Gerät entfernen">Sperren</button>
+      <nav class="aktionen" aria-label="Aktionen">
+        <button id="wuerfeln" class="knopf leise" type="button" disabled title="Andere Varianten deiner Buchstaben mischen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2"/><circle cx="15" cy="15" r="1.2"/><circle cx="15" cy="9" r="1.2"/><circle cx="9" cy="15" r="1.2"/></svg>
+          <span class="beschriftung">Neu würfeln</span></button>
+        <button id="laden" class="knopf" type="button" disabled title="Als .goodnotes-Datei speichern">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M5 21h14"/></svg>
+          <span class="beschriftung">Herunterladen</span></button>
+        <button id="teilen" class="knopf primaer" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
+          In GoodNotes öffnen</button>
+        <button id="sperren" class="knopf leise rund" type="button" title="Passwort von diesem Gerät entfernen" aria-label="Sperren">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></button>
+      </nav>
     </header>
 
+    <section class="einstellungen" aria-label="Einstellungen">
+      <div class="gruppe">
+        <span class="etikett" id="papier-etikett">Papier</span>
+        <div class="umschalter" role="radiogroup" aria-labelledby="papier-etikett" data-gruppe="art">
+          <button type="button" role="radio" data-wert="kariert-klein">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18M3 13h18M3 18h18M8 3v18M13 3v18M18 3v18"/></svg>Kariert</button>
+          <button type="button" role="radio" data-wert="liniert-schmal">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 11h18M3 15h18M3 19h18"/></svg>Liniert schmal</button>
+          <button type="button" role="radio" data-wert="liniert-gross">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18M3 14h18M3 20h18"/></svg>Liniert groß</button>
+        </div>
+      </div>
+      <div class="gruppe">
+        <span class="etikett" id="format-etikett">Format</span>
+        <div class="umschalter" role="radiogroup" aria-labelledby="format-etikett" data-gruppe="format">
+          <button type="button" role="radio" data-wert="A4">A4</button>
+          <button type="button" role="radio" data-wert="GoodNotes">GoodNotes</button>
+        </div>
+      </div>
+      <div class="gruppe">
+        <span class="etikett">Gliederung</span>
+        <div class="schalter-reihe">
+          <label class="schalter"><input id="opt-abstand" type="checkbox"><span></span>Linie frei zwischen Stichpunkten</label>
+          <label class="schalter"><input id="opt-unterstreichen" type="checkbox"><span></span>Überschriften unterstreichen</label>
+        </div>
+      </div>
+    </section>
+
     <main class="werkbank">
-      <section class="eingabe karte" aria-label="Text und Einstellungen">
-        <div class="feld">
-          <span class="etikett" id="papier-etikett">Papier</span>
-          <div class="umschalter" role="radiogroup" aria-labelledby="papier-etikett" data-gruppe="art">
-            <button type="button" role="radio" data-wert="kariert-klein">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18M3 13h18M3 18h18M8 3v18M13 3v18M18 3v18"/></svg>Kariert</button>
-            <button type="button" role="radio" data-wert="liniert-schmal">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 11h18M3 15h18M3 19h18"/></svg>Liniert schmal</button>
-            <button type="button" role="radio" data-wert="liniert-gross">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8h18M3 14h18M3 20h18"/></svg>Liniert groß</button>
-          </div>
-        </div>
-        <div class="feld">
-          <span class="etikett" id="format-etikett">Format</span>
-          <div class="umschalter" role="radiogroup" aria-labelledby="format-etikett" data-gruppe="format">
-            <button type="button" role="radio" data-wert="A4">A4</button>
-            <button type="button" role="radio" data-wert="GoodNotes">GoodNotes</button>
-          </div>
-        </div>
-        <div class="feld">
-          <label class="etikett" for="titel">Dateiname</label>
-          <input id="titel" type="text" placeholder="z. B. Sozialkunde Zusammenfassung" enterkeyhint="next">
-        </div>
-        <div class="feld wachsend">
-          <label class="etikett" for="text">Text</label>
-          <textarea id="text" spellcheck="true" placeholder="Text hier einfügen oder tippen …"></textarea>
-        </div>
+      <section class="eingabe karte" aria-label="Text">
+        <input id="titel" class="titel" type="text" placeholder="Dateiname, z. B. Mathe – ABC-Formel" enterkeyhint="next" aria-label="Dateiname">
+        <textarea id="text" spellcheck="true" placeholder="Text hier einfügen oder tippen …" aria-label="Text"></textarea>
         <details class="tipps">
-          <summary>Tipps zum Format</summary>
-          <ul>
-            <li><code>- Punkt</code> am Zeilenanfang wird ein Stichpunkt mit Spiegelstrich, <code>* Punkt</code> einer mit Punkt.</li>
-            <li>Zwei Leerzeichen davor rücken einen Unterpunkt ein; <code>1.</code> nummeriert.</li>
-            <li>Eine Leerzeile lässt auf dem Papier eine Linie frei.</li>
-            <li>„Neu würfeln“ mischt andere Varianten deiner Buchstaben.</li>
-          </ul>
+          <summary>So formatierst du</summary>
+          <dl>
+            <dt><code>- Punkt</code> · <code>• Punkt</code> · <code>1. Punkt</code></dt><dd>Stichpunkte – auch aus Word oder Notizen eingefügt. Zwei Leerzeichen davor = Unterpunkt.</dd>
+            <dt><code># Titel</code> · <code>Thema:</code></dt><dd>Überschrift (kurze Zeile mit Doppelpunkt zählt auch).</dd>
+            <dt><code>$x^2 + 1$</code> · <code>a_1</code></dt><dd>Formel mit Hochzahl/Index – <code>x^2</code> geht auch ohne $.</dd>
+            <dt><code>$\frac{a}{b}$</code> · <code>$a/b$</code> · <code>$\sqrt{x}$</code></dt><dd>Bruch und Wurzel (die Wurzel wächst mit dem Inhalt).</dd>
+            <dt><code>\pm \cdot \le \ne \pi \alpha</code></dt><dd>± · ≤ ≠ π α – im Formelteil.</dd>
+          </dl>
         </details>
       </section>
 
@@ -89,17 +103,6 @@
           <button id="zurueck" class="knopf leise rund" type="button" aria-label="Vorige Seite">‹</button>
           <span id="seitenzahl">Seite 1 von 1</span>
           <button id="weiter" class="knopf leise rund" type="button" aria-label="Nächste Seite">›</button>
-        </div>
-        <div class="aktionen">
-          <button id="teilen" class="knopf primaer" type="button" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L7.5 7.5M12 3l4.5 4.5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>
-            In GoodNotes öffnen</button>
-          <button id="laden" class="knopf" type="button" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M5 21h14"/></svg>
-            Herunterladen</button>
-          <button id="wuerfeln" class="knopf leise" type="button" disabled>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2"/><circle cx="15" cy="15" r="1.2"/><circle cx="15" cy="9" r="1.2"/><circle cx="9" cy="15" r="1.2"/></svg>
-            Neu würfeln</button>
         </div>
         <p id="status" class="status" role="status"></p>
       </section>
