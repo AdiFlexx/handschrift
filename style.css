@@ -92,7 +92,23 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 .umschalter button[aria-checked=true] { background: var(--akzent); color: var(--akzent-text); font-weight: 600; }
 .umschalter button:focus-visible { outline: 2px solid var(--akzent); outline-offset: 2px; }
 
-.schalter-reihe { display: flex; flex-wrap: wrap; gap: 8px; }
+.layout-zeile { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.layout-zeile .knopf { min-height: 46px; box-shadow: var(--schatten); }
+#anpassen[aria-expanded=true] { border-color: var(--akzent); color: var(--akzent); }
+.feinheiten {
+  max-width: 1288px; margin: 10px auto 0; padding: 16px;
+  display: grid; gap: 18px 28px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+@media (max-width: 1320px) { .feinheiten { margin: 10px 16px 0; } }
+.spalte { display: grid; gap: 10px; align-content: start; }
+.schalter .text { font-style: normal; display: grid; line-height: 1.3; }
+.schalter small { color: var(--gedaempft); font-size: 13px; }
+.feinheiten .schalter { box-shadow: none; }
+.umschalter.klein { box-shadow: none; }
+.umschalter.klein button { min-height: 38px; flex: 1; }
+.regler { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 15px; }
+.regler output { color: var(--akzent); font-weight: 600; font-variant-numeric: tabular-nums; }
+.regler input { grid-column: 1 / -1; width: 100%; accent-color: var(--akzent); height: 28px; }
 .schalter {
   display: inline-flex; align-items: center; gap: 10px; min-height: 46px; padding: 6px 14px 6px 8px;
   background: var(--karte); border: 1px solid var(--rand); border-radius: 13px; box-shadow: var(--schatten);

@@ -70,11 +70,44 @@
         </div>
       </div>
       <div class="gruppe">
-        <span class="etikett">Gliederung</span>
-        <div class="schalter-reihe">
-          <label class="schalter"><input id="opt-abstand" type="checkbox"><span></span>Linie frei zwischen Stichpunkten</label>
-          <label class="schalter"><input id="opt-unterstreichen" type="checkbox"><span></span>Überschriften unterstreichen</label>
+        <span class="etikett" id="layout-etikett">Platz</span>
+        <div class="layout-zeile">
+          <div class="umschalter" role="radiogroup" aria-labelledby="layout-etikett" data-gruppe="preset">
+            <button type="button" role="radio" data-wert="kompakt">Kompakt</button>
+            <button type="button" role="radio" data-wert="normal">Normal</button>
+            <button type="button" role="radio" data-wert="luftig">Luftig</button>
+            <button type="button" role="radio" data-wert="eigene" id="preset-eigene" hidden>Eigene</button>
+          </div>
+          <button id="anpassen" class="knopf" type="button" aria-expanded="false" aria-controls="feinheiten">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+            Anpassen</button>
         </div>
+      </div>
+    </section>
+
+    <section id="feinheiten" class="feinheiten karte" aria-label="Einstellungen im Detail" hidden>
+      <div class="spalte">
+        <span class="etikett">Abstände</span>
+        <label class="schalter"><input data-option="abstandStichpunkte" type="checkbox"><span></span>Linie frei zwischen Stichpunkten</label>
+        <label class="schalter"><input data-option="abstandUeberschrift" type="checkbox"><span></span>Linie frei vor und nach Überschriften</label>
+        <div class="umschalter klein" role="radiogroup" aria-label="Linien beschreiben" data-gruppe="zeilenSprung">
+          <button type="button" role="radio" data-wert="1">Jede Linie</button>
+          <button type="button" role="radio" data-wert="2">Jede zweite Linie</button>
+        </div>
+      </div>
+      <div class="spalte">
+        <span class="etikett">Gliederung</span>
+        <label class="schalter"><input data-option="unterstreichen" type="checkbox"><span></span>Überschriften unterstreichen</label>
+        <label class="schalter"><input data-option="gliedern" type="checkbox"><span></span><em class="text">Automatisch gliedern<small>Absätze → ein Stichpunkt je Satz</small></em></label>
+      </div>
+      <div class="spalte">
+        <span class="etikett">Schrift</span>
+        <label class="regler">Größe <output data-anzeige="groesse"></output>
+          <input data-option="groesse" type="range" min="0.8" max="1.25" step="0.05"></label>
+        <label class="regler">Wortabstand <output data-anzeige="wortabstand"></output>
+          <input data-option="wortabstand" type="range" min="0.7" max="1.5" step="0.05"></label>
+        <label class="regler">Buchstabenabstand <output data-anzeige="buchstabenabstand"></output>
+          <input data-option="buchstabenabstand" type="range" min="0.7" max="1.5" step="0.05"></label>
       </div>
     </section>
 

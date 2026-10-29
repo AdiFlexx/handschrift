@@ -1,10 +1,10 @@
-import { Handschrift, goodnotesDatei } from "./handschrift.js";
+import { Handschrift, goodnotesDatei, VOREINSTELLUNGEN } from "./handschrift.js";
 
 const $ = (id) => document.getElementById(id);
 const SPEICHER = { schluessel: "handschrift-schluessel", entwurf: "handschrift-entwurf" };
 const TINTE = "#15181f";
 
-const zustand = { daten: null, art: "kariert-klein", format: "A4", abstand: true, unterstreichen: true,
+const zustand = { daten: null, art: "kariert-klein", format: "A4", preset: "normal", optionen: { ...VOREINSTELLUNGEN.normal },
                   seed: neuerSeed(), seiten: [], seite: 0, papier: null };
 const bilder = new Map();                                // Papierhintergründe, einmal geladen
 
@@ -77,12 +77,21 @@ function oeffnen(daten) {
   const entwurf = lies(SPEICHER.entwurf, {});
   zustand.art = entwurf.art ?? zustand.art;
   zustand.format = entwurf.format ?? zustand.format;
-  zustand.abstand = entwurf.abstand ?? zustand.abstand;
-  zustand.unterstreichen = entwurf.unterstreichen ?? zustand.unterstreichen;
-  for (const [id, feld] of [["opt-abstand", "abstand"], ["opt-unterstreichen", "unterstreichen"]]) {
-    $(id).checked = zustand[feld];
-    $(id).addEventListener("change", () => { zustand[feld] = $(id).checked; neuSetzen(); });
+  zustand.optionen = { ...VOREINSTELLUNGEN.normal, ...(entwurf.optionen ?? {}) };
+  zustand.preset = passendesPreset();
+  for (const feld of document.querySelectorAll("[data-option]")) {       // Einzel-Einstellungen
+    feld.addEventListener("input", () => {
+      zustand.optionen[feld.dataset.option] = feld.type === "checkbox" ? feld.checked : Number(feld.value);
+      zustand.preset = passendesPreset();
+      einstellungenZeigen();
+      neuSetzen();
+    });
   }
+  $("anpassen").addEventListener("click", () => {
+    const offen = $("feinheiten").hidden;
+    $("feinheiten").hidden = !offen;
+    $("anpassen").setAttribute("aria-expanded", String(offen));
+  });
   $("titel").value = entwurf.titel ?? "";
   $("text").value = entwurf.text ?? "";
   $("sperre").hidden = true;
@@ -91,13 +100,23 @@ function oeffnen(daten) {
   for (const gruppe of document.querySelectorAll(".umschalter")) {
     gruppe.addEventListener("click", (e) => {
       const knopf = e.target.closest("button");
-      if (!knopf) return;
-      zustand[gruppe.dataset.gruppe] = knopf.dataset.wert;
-      umschalterZeigen();
+      if (!knopf || knopf.hidden) return;
+      const art = gruppe.dataset.gruppe, wert = knopf.dataset.wert;
+      if (art === "preset") {
+        if (!VOREINSTELLUNGEN[wert]) return;
+        zustand.optionen = { ...VOREINSTELLUNGEN[wert] };
+        zustand.preset = wert;
+      } else if (art === "zeilenSprung") {
+        zustand.optionen.zeilenSprung = Number(wert);
+        zustand.preset = passendesPreset();
+      } else {
+        zustand[art] = wert;
+      }
+      einstellungenZeigen();
       neuSetzen();
     });
   }
-  umschalterZeigen();
+  einstellungenZeigen();
 
   let warten;
   const beimTippen = () => { clearTimeout(warten); warten = setTimeout(neuSetzen, 350); };
@@ -113,19 +132,31 @@ function oeffnen(daten) {
   neuSetzen();
 }
 
-function umschalterZeigen() {
+function passendesPreset() {
+  const o = zustand.optionen;
+  return Object.keys(VOREINSTELLUNGEN).find((n) => Object.entries(VOREINSTELLUNGEN[n]).every(([k, v]) => o[k] === v)) ?? "eigene";
+}
+
+function einstellungenZeigen() {
+  const werte = { art: zustand.art, format: zustand.format, preset: zustand.preset, zeilenSprung: String(zustand.optionen.zeilenSprung) };
   for (const gruppe of document.querySelectorAll(".umschalter")) {
     for (const knopf of gruppe.querySelectorAll("button")) {
-      knopf.setAttribute("aria-checked", String(knopf.dataset.wert === zustand[gruppe.dataset.gruppe]));
+      knopf.setAttribute("aria-checked", String(knopf.dataset.wert === werte[gruppe.dataset.gruppe]));
     }
   }
+  $("preset-eigene").hidden = zustand.preset !== "eigene";
+  for (const feld of document.querySelectorAll("[data-option]")) {
+    const wert = zustand.optionen[feld.dataset.option];
+    if (feld.type === "checkbox") feld.checked = wert; else feld.value = wert;
+  }
+  for (const a of document.querySelectorAll("[data-anzeige]")) a.textContent = `${Math.round(zustand.optionen[a.dataset.anzeige] * 100)} %`;
   const name = `${zustand.art}_${zustand.format}`;
   zustand.papier = zustand.daten.papiere.find((p) => p.name === name) ?? zustand.daten.papiere[0];
 }
 
 function entwurfSichern() {
   schreib(SPEICHER.entwurf, { text: $("text").value, titel: $("titel").value, art: zustand.art, format: zustand.format,
-                              abstand: zustand.abstand, unterstreichen: zustand.unterstreichen });
+                              optionen: zustand.optionen });
 }
 
 function neuSetzen() {
@@ -140,7 +171,7 @@ function neuSetzen() {
     return zeichnen();
   }
   const hand = new Handschrift(zustand.daten, zustand.seed);
-  zustand.seiten = hand.setzen(text, zustand.papier, { abstand: zustand.abstand, unterstreichen: zustand.unterstreichen });
+  zustand.seiten = hand.setzen(text, zustand.papier, zustand.optionen);
   zustand.seite = Math.min(zustand.seite, zustand.seiten.length - 1);
   const fehlend = [...hand.fehlend];
   const n = zustand.seiten.length;
