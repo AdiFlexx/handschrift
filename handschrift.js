@@ -64,8 +64,8 @@ export function ueberschriftErkennen(zeile) {
   return null;
 }
 
-// Anweisungen am Textanfang (für KI): @papier, @format, @platz, @groesse, @wortabstand, @gliedern, @unterstreichen, @titel
-const ANWEISUNG = /^\s*@(papier|format|platz|groesse|größe|wortabstand|buchstabenabstand|gliedern|unterstreichen|titel|zeilen)\s*:\s*(.+?)\s*$/i;
+// Anweisungen am Textanfang (für KI): @papier, @format, @platz, @layout, @groesse, @wortabstand, @gliedern, @unterstreichen, @titel
+const ANWEISUNG = /^\s*@(papier|format|platz|layout|groesse|größe|wortabstand|buchstabenabstand|gliedern|unterstreichen|titel|zeilen)\s*:\s*(.+?)\s*$/i;
 
 export function anweisungenLesen(text) {
   const anweisungen = {};
@@ -90,7 +90,10 @@ export function anweisungenAnwenden(anweisungen, basis) {
   const format = { a4: "A4", goodnotes: "GoodNotes" }[String(a.format ?? "").toLowerCase()];
   if (format) aus.format = format;
   const platz = String(a.platz ?? "").toLowerCase();
-  if (VOREINSTELLUNGEN[platz]) aus.optionen = { ...VOREINSTELLUNGEN[platz] };
+  if (VOREINSTELLUNGEN[platz]) aus.optionen = { ...aus.optionen, ...VOREINSTELLUNGEN[platz] };
+  const layout = { standard: "standard", normal: "standard", spalten: "spalten", "zwei spalten": "spalten", "2 spalten": "spalten",
+                   cornell: "cornell", notizen: "cornell", rand: "rand", mathe: "rand", "mit rand": "rand" }[String(a.layout ?? "").toLowerCase()];
+  if (layout) aus.optionen.layout = layout;
   for (const [k, min, max] of [["groesse", 0.8, 1.25], ["wortabstand", 0.7, 1.5], ["buchstabenabstand", 0.7, 1.5]]) {
     const n = a[k] != null ? zahl(a[k]) : null;
     if (n != null) aus.optionen[k] = Math.min(max, Math.max(min, n));
@@ -100,6 +103,127 @@ export function anweisungenAnwenden(anweisungen, basis) {
   if (/^(1|jede)$/i.test(a.zeilen ?? "")) aus.optionen.zeilenSprung = 1;
   if (a.titel) aus.titel = a.titel;
   return aus;
+}
+
+// --- Layouts ----------------------------------------------------------------------------
+// Bahnen = waagerechte Bereiche (pt), in denen Zeilen stehen: voll (ganze Breite), haupt (Fließtext),
+// schmal + neben (Hauptrechnung links, Nebenrechnung rechts daneben), stichwort (Cornell-Stichwortspalte).
+
+export const LAYOUTS = { standard: "Standard", spalten: "Zwei Spalten", cornell: "Cornell-Notizen", rand: "Mit Rand" };
+
+export function layoutBahnen(layout, papier) {
+  const L = papier.x_links, R = papier.x_rechts, W = R - L;
+  const geteilt = (x0, x1) => ({ schmal: [x0, x0 + 0.6 * (x1 - x0)], neben: [x0 + 0.66 * (x1 - x0), x1] });
+  const strich = (x0, x1) => x0 + 0.63 * (x1 - x0);       // senkrechter Strich vor der Nebenrechnung
+  if (layout === "spalten") {
+    const g = 0.06 * W, s = (W - g) / 2;
+    return { name: layout, bahnen: { voll: [L, R], haupt: [L, L + s], stichwort: [L, L + s], ...geteilt(L, L + s) },
+             nrStrich: strich(L, L + s), spalteDx: s + g, trenner: L + s + g / 2 };
+  }
+  if (layout === "cornell") {
+    const h = L + 0.33 * W;
+    return { name: layout, bahnen: { voll: [L, R], stichwort: [L, L + 0.27 * W], haupt: [h, R], ...geteilt(h, R) },
+             nrStrich: strich(h, R), trenner: L + 0.3 * W };
+  }
+  if (layout === "rand") {                               // Heft mit Rand: Nebenrechnungen in den Rand
+    const haupt = [L, L + 0.7 * W];
+    return { name: layout, bahnen: { voll: [L, R], haupt, schmal: haupt, stichwort: haupt, neben: [L + 0.77 * W, R] },
+             nrStrich: null, trenner: L + 0.735 * W };
+  }
+  return { name: "standard", bahnen: { voll: [L, R], haupt: [L, R], stichwort: [L, R], ...geteilt(L, R) }, nrStrich: strich(L, R) };
+}
+
+const BEFEHL = /^\s*\[(leer|seite|kasten|\/kasten)(?:\s+(\d{1,2}))?\]\s*$/i;
+const PRAEFIX = /^\s*\[(mitte|rechts|neben|ergebnis)\]\s*/i;
+const NEBENRECHNUNG = /^\s*(NR|Nebenrechnung)\s*:/i;
+const ZUSAMMENFASSUNG = /^(zusammenfassung|fazit|kurz gesagt|zum schluss|summary)\b/i;
+const BEGRIFF = /^(==)?([A-ZÄÖÜ][\wäöüßÄÖÜ-]*(?: [\wäöüßÄÖÜ-]+){0,2})\1\s*(?::|\s[-–]\s)\s*(\S.*)$/;
+
+// Zeilen des Textes einer Bahn zuordnen: Nebenrechnungen rechts daneben, im Cornell-Layout Überschriften und
+// Begriffe in die Stichwortspalte, Titel über die ganze Breite.
+function postenBilden(zeilen, B) {
+  const posten = [];
+  let imKasten = false, schluss = false, erster = true;
+  for (const zeile of zeilen) {
+    const befehl = BEFEHL.exec(zeile);
+    if (befehl) {
+      const art = befehl[1].toLowerCase();
+      if (art === "kasten") imKasten = true;
+      if (art === "/kasten") imKasten = false;
+      posten.push({ befehl: art, n: befehl[2] });
+      continue;
+    }
+    let roh = zeile, praefix = false;
+    const p = { bahn: "haupt" };
+    for (let m; (m = PRAEFIX.exec(roh)); roh = roh.slice(m[0].length)) { p[m[1].toLowerCase()] = true; praefix = true; }
+    if (praefix && !roh.trim()) continue;
+    if (NEBENRECHNUNG.test(roh)) p.neben = true;
+    p.roh = roh;
+    if (!roh.trim()) { posten.push(p); continue; }
+    const ue = /^\s*\$\$/.test(roh) ? null : ueberschriftErkennen(roh);
+    if (p.neben) {
+      p.bahn = "neben";
+      p.anker = "vorher";
+    } else if (B.name === "cornell") {
+      if (ue && !schluss && ZUSAMMENFASSUNG.test(ue.text)) { schluss = true; posten.push({ roh: "---", bahn: "voll" }); }
+      const d = !ue && !imKasten && !p.mitte && !p.rechts && !stichpunktErkennen(roh) ? BEGRIFF.exec(roh.trim()) : null;
+      if (schluss) p.bahn = "voll";
+      else if (ue && ue.stufe === 1 && erster) { p.bahn = "voll"; p.mitte = true; }
+      else if (ue && !imKasten) { p.bahn = "stichwort"; p.anker = "nachher"; }
+      else if (d && d[3].split(/\s+/).length >= 2 && !/[=$]/.test(d[3])) {
+        posten.push({ roh: d[1] ? `==${d[2]}==` : d[2], bahn: "stichwort", anker: "nachher" });
+        p.roh = d[3];
+      }
+    } else if (B.name === "spalten" && ue && ue.stufe === 1 && erster) {
+      p.bahn = "voll";
+      p.mitte = true;
+    }
+    erster = false;
+    posten.push(p);
+  }
+  if (B.bahnen.schmal[1] < B.bahnen.haupt[1]) {          // Absätze mit Nebenrechnung: Hauptteil schmaler
+    let block = [];
+    const fertig = () => {
+      if (block.some((p) => p.bahn === "neben")) for (const p of block) if (p.bahn === "haupt") p.bahn = "schmal";
+      block = [];
+    };
+    for (const p of posten) {
+      if (p.befehl || !p.roh.trim() || (p.bahn === "haupt" && ueberschriftErkennen(p.roh))) fertig();
+      else block.push(p);
+    }
+    fertig();
+  }
+  return posten;
+}
+
+// Rechenschritte untereinander: Gleichheitszeichen bündig, Umformungen („| -5“) in einer Spalte.
+function rechnungenAusrichten(zeilen) {
+  const offen = new Map();
+  const verschieben = (z, dx, ab = 0) => {
+    z.teile.forEach((t, i) => { if (i >= ab) t.x += dx; });
+    if (!ab) z.linien = z.linien.map((l) => l.map(([px, py]) => [px + dx, py]));
+    z.ende += dx;
+  };
+  const fertig = (bahn) => {
+    const g = offen.get(bahn);
+    offen.delete(bahn);
+    if (!g || g.length < 2) return;
+    const ziel = Math.max(...g.map((z) => z.gleichX));
+    if (g.every((z) => z.ende + ziel - z.gleichX <= z.rechts)) for (const z of g) verschieben(z, ziel - z.gleichX);
+    const mit = g.filter((z) => z.strichAb != null);
+    if (mit.length < 2) return;
+    const zs = Math.max(...mit.map((z) => z.teile[z.strichAb].x));
+    if (mit.every((z) => z.ende + zs - z.teile[z.strichAb].x <= z.rechts)) for (const z of mit) verschieben(z, zs - z.teile[z.strichAb].x, z.strichAb);
+  };
+  for (const z of zeilen) {
+    if (z.umbruch || z.frei) for (const b of [...offen.keys()]) fertig(b);
+    if (!z.teile) continue;
+    if (z.einzeilig && z.gleichX != null && !z.ausgerichtet && z.teile.length) {
+      if (!offen.has(z.bahn)) offen.set(z.bahn, []);
+      offen.get(z.bahn).push(z);
+    } else fertig(z.bahn);
+  }
+  for (const b of [...offen.keys()]) fertig(b);
 }
 
 // --- Mathe ------------------------------------------------------------------------------
@@ -208,7 +332,11 @@ const ERSATZ = {
   "Σ": [[[1.0, -1.8], [0.05, -1.8], [0.55, -0.9], [0.05, 0], [1.0, 0]]],
   "Ω": [[[0.05, 0], [0.35, 0], [0.15, -0.6], [0.2, -1.4], [0.55, -1.8], [0.9, -1.4], [0.95, -0.6], [0.75, 0], [1.05, 0]]],
   "…": [[[0.1, -0.05], [0.12, -0.03]], [[0.5, -0.05], [0.52, -0.03]], [[0.9, -0.05], [0.92, -0.03]]],
+  "|": [[[0.2, -1.75], [0.18, -0.6], [0.15, 0.45]]],
+  "{": [[[0.5, -1.75], [0.28, -1.62], [0.25, -1.05], [0.05, -0.85], [0.25, -0.68], [0.22, -0.05], [0.45, 0.12]]],
+  "}": [[[0.05, -1.75], [0.27, -1.62], [0.3, -1.05], [0.5, -0.85], [0.3, -0.68], [0.33, -0.05], [0.1, 0.12]]],
 };
+const HOCHGESTELLT = { "²": "2", "³": "3", "¹": "1", "⁰": "0", "⁴": "4" };
 
 // --- Satz ---------------------------------------------------------------------------
 
@@ -279,17 +407,31 @@ export class Handschrift {
              breite: (Math.max(...xs) - x0) * sx };
   }
 
+  // Von Hand gezeichneter Ersatz für Zeichen, die (noch) nicht in der Bibliothek sind.
+  ersatz(c) {
+    const striche = ERSATZ[c].map((s) => s.map(([x, y]) => [x + this.zufall.gauss(0, 0.02), y + this.zufall.gauss(0, 0.02)]));
+    return { striche, breite: Math.max(...striche.flat().map(([x]) => x)) };
+  }
+
   wort(text) {
     const teile = [];
     let x = 0;
-    for (const c of text) {
-      let g = this.variante(c === "–" ? "-" : c);
+    for (let c of text) {
+      const hoch = HOCHGESTELLT[c];                      // cm², m³ – kleine hochgestellte Ziffer
+      if (hoch) c = hoch;
+      if (c === "−") c = "-";
+      let g = !this.glyphen[c] && !UMLAUTE[c] && ERSATZ[c] ? this.ersatz(c) : this.variante(c === "–" ? "-" : c);
       if (!g) continue;
       if (teile.length) x += Math.max(0.12, this.zufall.gauss(this.p.luecke, 0.25 * this.p.luecke_streuung)) * (this.buchstabenabstand ?? 1);
       let faktor = VERSALHOCH.has(c) ? this.versal / Handschrift.hoehe(g) : 1.0;   // einheitliche Ziffernhöhe
       let skala = faktor * this.zufall.gauss(1.0, 0.04);
       let dy = this.zufall.gauss(0.0, 0.05);
       if (/[0-9]/.test(c)) dy -= Math.max(...g.striche.flatMap((s) => s.map(([, y]) => y))) * skala;
+      if (hoch) {
+        faktor *= 0.55;
+        skala *= 0.55;
+        dy = -0.75 - Math.max(...g.striche.flatMap((s) => s.map(([, y]) => y))) * skala;
+      }
       if ("-–+".includes(c)) {                           // Strich/Plus mittig auf der Zeile
         const laenge = { "-": 0.75, "–": 1.05, "+": 0.95 }[c];
         g = Handschrift.mittig(g, this.zufall.gauss(laenge, 0.06), -0.45, c === "+");
@@ -363,9 +505,8 @@ export class Handschrift {
       return Handschrift.boxAus([[0, m, 1, 0]], m.breite);
     }
     if (!g && ERSATZ[c]) {                               // noch nicht in der Bibliothek: Ersatz von Hand gezeichnet
-      const striche = ERSATZ[c].map((s) => s.map(([x, y]) => [x + this.zufall.gauss(0, 0.02), y + this.zufall.gauss(0, 0.02)]));
-      const breite = Math.max(...striche.flat().map(([x]) => x));
-      return Handschrift.boxAus([[0, { striche, breite }, 1, 0]], breite);
+      const e = this.ersatz(c);
+      return Handschrift.boxAus([[0, e, 1, 0]], e.breite);
     }
     const [teile, w] = this.wort(c);
     return Handschrift.boxAus(teile, w);
@@ -445,48 +586,56 @@ export class Handschrift {
   }
 
   // Setzt den Text auf die Linien des Papiers; liefert Seiten als Strich-Listen (pt).
-  // Phase 1 baut die Zeilen (Umbruch, Stichpunkte, Formeln, Regeln aus dem Regelblatt), Phase 2 legt jede Zeile
-  // auf die nächste Linie, auf der sie nichts berührt – so überlappt nie etwas.
+  // Phase 1 baut die Zeilen (Umbruch, Stichpunkte, Formeln, Regeln aus dem Regelblatt) in ihrer Bahn des Layouts,
+  // Phase 2 legt jede Zeile auf die nächste Linie, auf der sie nichts berührt – so überlappt nie etwas.
   setzen(text, papier, optionen = {}) {
-    const o = { ...VOREINSTELLUNGEN.normal, ...optionen };
+    const o = { ...VOREINSTELLUNGEN.normal, ...GLIEDERUNG, ...optionen };
     this.buchstabenabstand = o.buchstabenabstand;
     const xh = this.schriftgroesse(papier) * o.groesse;
     const oben = Math.max(36.0, this.versal * xh + 14);
     const linien = papier.linien.filter((y) => y >= oben && y <= papier.hoehe - 2.2 * xh);
     const wortabst = Math.min(Math.max(this.p.wortabstand, 1.5), 3.5) * o.wortabstand;
     const breite = this.p.strichbreite_pt;
+    const B = layoutBahnen(o.layout, papier);
     const skaliert = (teile, f) => teile.map(([gx, g, s, d]) => [gx * f, g, s * f, d * f]);
     // Handgezogene Linie; „weg“ = +1: liegt nie höher als y (Unterstrich), -1: nie tiefer als y (Rahmen-Oberkante).
-    const handLinie = (x0, x1, y, zittern = 0.04, weg = 0) => {
-      const n = Math.max(2, Math.round((x1 - x0) / (1.5 * xh))), neig = this.zufall.gauss(0, 0.006);
+    const handLinie = (x0, x1, y, zittern = 0.04, weg = 0, neig = this.zufall.gauss(0, 0.006)) => {
+      const n = Math.max(2, Math.round((x1 - x0) / (1.5 * xh)));
       const pts = Array.from({ length: n + 1 }, (_, i) => [x0 + (x1 - x0) * i / n, y + (x1 - x0) * (i / n) * neig + this.zufall.gauss(0, zittern * xh)]);
       const ys = pts.map(([, py]) => py);
       const dy = weg > 0 ? y - Math.min(...ys) : weg < 0 ? y - Math.max(...ys) : 0;
       return pts.map(([px, py]) => [px, py + dy]);
     };
+    const doppelt = (x0, x1, y) => {                     // Ergebnis: doppelt unterstrichen, beide Striche parallel
+      const neig = this.zufall.gauss(0, 0.004);
+      return [handLinie(x0, x1, y, 0.03, 1, neig), handLinie(x0 + 0.1 * xh, x1 - 0.05 * xh, y + 0.42 * xh, 0.03, 1, neig)];
+    };
+    const senkrecht = (x, y0, y1) => {                   // Rand, Spaltentrenner, Strich vor Nebenrechnungen
+      const n = Math.max(2, Math.round((y1 - y0) / (1.5 * xh))), schief = this.zufall.gauss(0, 0.001) * (y1 - y0);
+      return Array.from({ length: n + 1 }, (_, i) => [x + schief * (i / n - 0.5) + this.zufall.gauss(0, 0.012 * xh), y0 + (y1 - y0) * i / n]);
+    };
 
     // --- Phase 1: Zeilen bauen ---
-    const zeilen = [];                                   // { frei, teile, linien, kasten, umbruch }
+    const zeilen = [];                                   // { frei, bahn, anker, teile, linien, kasten, umbruch }
     let frei = 0, vorher = null, kasten = null, kastenNr = 0, idNr = 0;
     let quelle = anweisungenLesen(textAufbereiten(text)).text;
-    if (o.gliedern) quelle = gliedern(quelle);
-    for (let roh of quelle.split("\n")) {
-      const befehl = /^\s*\[(leer|seite|kasten|\/kasten)(?:\s+(\d{1,2}))?\]\s*$/i.exec(roh);
-      if (befehl) {
-        const art = befehl[1].toLowerCase();
-        if (art === "leer") frei += Math.min(20, Number(befehl[2] ?? 1));
+    if (o.gliedern) quelle = gliedern(quelle, o);
+    for (const p of postenBilden(quelle.split("\n"), B)) {
+      if (p.befehl) {
+        const art = p.befehl;
+        if (art === "leer") frei += Math.min(20, Number(p.n ?? 1));
         if (art === "seite") { zeilen.push({ umbruch: true }); frei = 0; vorher = null; }
         if (art === "kasten") { kasten = ++kastenNr; if (vorher) frei = Math.max(frei, 1); vorher = null; }
         if (art === "/kasten" && kasten) { kasten = null; frei = Math.max(frei, 1); vorher = null; }
         continue;
       }
+      let roh = p.roh;
       if (!roh.trim()) { frei += 1; vorher = null; continue; }   // Leerzeile = eine Linie frei
-      let ausrichtung = null;
-      const ausr = /^\s*\[(mitte|rechts)\]\s*(.*)$/i.exec(roh);
-      if (ausr) { ausrichtung = ausr[1].toLowerCase(); roh = ausr[2]; if (!roh.trim()) continue; }
+      const neben = p.bahn === "neben";
+      const [bx0, bx1] = B.bahnen[p.bahn];
+      let ausrichtung = p.mitte ? "mitte" : p.rechts ? "rechts" : null;
       if (/^\s*([-*_])\1{2,}\s*$/.test(roh)) {           // --- Trennlinie
-        const y = -0.5 * xh;
-        zeilen.push({ frei, kasten, teile: [], linien: [handLinie(papier.x_links, papier.x_rechts, y, 0.03)] });
+        zeilen.push({ frei, kasten, bahn: p.bahn, x0: bx0, x1: bx1, teile: [], linien: [handLinie(bx0, bx1, -0.5 * xh, 0.03)] });
         frei = 0; vorher = "linie";
         continue;
       }
@@ -494,14 +643,19 @@ export class Handschrift {
       if (formelZeile) { roh = `$${formelZeile[1]}$`; ausrichtung = ausrichtung ?? "mitte"; }
       const ue = formelZeile ? null : ueberschriftErkennen(roh);
       const sp = ue || formelZeile ? null : stichpunktErkennen(roh);
-      if (vorher && !frei && ((o.abstandStichpunkte && sp && vorher === "stichpunkt") ||
+      const nebenStichwort = vorher === "stichwort";     // Cornell: der Inhalt steht neben seinem Stichwort
+      if (!neben && vorher && !frei && !nebenStichwort && ((o.abstandStichpunkte && sp && vorher === "stichpunkt") ||
                               (o.abstandUeberschrift && (ue || vorher === "ueberschrift")))) frei += 1;
       const rand = kasten ? 1.0 * xh : 0;                // Text im Kasten etwas eingerückt
-      const linksRand = papier.x_links + rand, rechtsRand = papier.x_rechts - rand;
+      const groesse = (ue && ue.stufe === 1 ? 1.2 : 1.0) * (neben ? 0.9 : 1.0);   // Hauptüberschrift größer, Nebenrechnung kleiner
+      // Steht rechts noch etwas (Strich, Spalte, Rand): Platz für die Schräglage der Großbuchstaben lassen
+      const ueberhang = bx1 < papier.x_rechts - 1 ? (this.versal * groesse * this.p.neigung_tan + 0.6) * xh : 0;
+      const linksRand = bx0 + rand, rechtsRand = bx1 - rand - ueberhang;
       const start = linksRand + this.zufall.uniform(-1.0, 1.5);
-      const groesse = ue && ue.stufe === 1 ? 1.2 : 1.0;   // Hauptüberschrift etwas größer
-      let zeile = { frei, kasten, teile: [], linien: [] };
-      frei = 0;
+      const neueZeile = () => ({ frei: 0, kasten, bahn: p.bahn, x0: bx0, x1: bx1, rechts: rechtsRand, teile: [], linien: [] });
+      let zeile = { ...neueZeile(), frei: neben ? 0 : frei, anker: p.anker };
+      if (!neben) frei = 0;                              // freie Linien gelten der Hauptspalte, nicht der Nebenrechnung
+      const anfang = zeilen.length;
       let x = start, links = start, drift = 0.0, zeilenAnfang = x, xEnde = x, markiert = false, markStart = null;
       const unterkante = () => Math.max(0.3, (zeile.tief ?? 0) + 0.2) * xh + breite + 0.6;   // unter die tiefste Unterlänge
       const markEnde = (bis) => {                        // ==Markierung== wird unterstrichen
@@ -511,12 +665,15 @@ export class Handschrift {
       const zeileFertig = () => {
         markEnde(xEnde);
         if (ue && o.unterstreichen && ue.stufe <= 2) zeile.linien.push(handLinie(zeilenAnfang - 0.2 * xh, xEnde + 0.3 * xh, unterkante(), 0.04, 1));
+        if (p.ergebnis && zeile.teile.length) zeile.linien.push(...doppelt(zeilenAnfang - 0.15 * xh, xEnde + 0.25 * xh, unterkante()));
         if (ausrichtung) {                               // [mitte] / [rechts] / $$…$$
           const frei2 = rechtsRand - (xEnde - zeilenAnfang) - linksRand;
           const dx = (ausrichtung === "mitte" ? frei2 / 2 : frei2) - (zeilenAnfang - linksRand);
           for (const t of zeile.teile) t.x += dx;
           zeile.linien = zeile.linien.map((l) => l.map(([px, py]) => [px + dx, py]));
+          zeile.ausgerichtet = true;
         }
+        zeile.ende = xEnde;
         zeilen.push(zeile);
       };
       if (sp) {                                          // Spiegelstrich davor, Folgezeilen bündig eingerückt
@@ -541,37 +698,41 @@ export class Handschrift {
           if (groesse !== 1) { teile = skaliert(teile, groesse); w *= groesse; }
           if (x > links && x + w * xh > rechtsRand) {    // Umbruch
             zeileFertig();
-            zeile = { frei: 0, kasten, teile: [], linien: [] };
+            zeile = neueZeile();
             x = links = sp ? links : linksRand + this.zufall.uniform(-1.0, 1.5);
             zeilenAnfang = x;
             drift = 0.0;
           }
           const neigung = this.p.neigung_tan + this.zufall.gauss(0, 0.03);
           drift = Math.max(-0.08, Math.min(0.08, drift + this.zufall.gauss(0, 0.03)));   // bleibt auf der Linie
+          if (zeile.gleichX == null && /^[=≈]$/.test(tok)) zeile.gleichX = x;           // für bündige Rechenschritte
+          if (zeile.strichAb == null && tok === "|") zeile.strichAb = zeile.teile.length;
           zeile.teile.push({ x, teile, drift, neigung, id: ++idNr });
           zeile.tief = Math.max(zeile.tief ?? 0, Handschrift.boxAus(teile, w).unten + Math.abs(drift));
           if (markiertHier && markStart === null) markStart = x;
           if (!markiertHier) markEnde(xEnde);
           xEnde = x + w * xh;
-          x += (w + Math.max(1.0, this.zufall.gauss(wortabst, 0.35))) * xh;
+          x += (w + (neben ? 0.7 : 1) * Math.max(1.0, this.zufall.gauss(wortabst, 0.35))) * xh;   // Nebenrechnung enger
         }
       }
       zeileFertig();
-      vorher = ue ? "ueberschrift" : sp ? "stichpunkt" : "text";
+      if (zeilen.length - anfang === 1) zeilen[anfang].einzeilig = true;
+      if (!neben) vorher = p.bahn === "stichwort" ? "stichwort" : ue ? "ueberschrift" : sp ? "stichpunkt" : "text";
     }
+    if (o.gliedern && o.gl_ausrichten) rechnungenAusrichten(zeilen);
 
     // --- Phase 2: auf Linien legen, ohne dass sich etwas berührt ---
-    const zeichneZeile = (z, y) => {
+    const zeichneZeile = (z, y, dx) => {
       const out = [];
       for (const { x, teile, drift, neigung, id } of z.teile) {
         for (const [gx, g, skala, dy] of teile) {
           const s = xh * skala, basis = y + (drift + dy) * xh;
           for (const strich of g.striche) {
-            out.push({ punkte: strich.map(([px, py]) => [x + gx * xh + px * s - py * s * neigung, basis + py * s]), breite, id, grund: y });
+            out.push({ punkte: strich.map(([px, py]) => [dx + x + gx * xh + px * s - py * s * neigung, basis + py * s]), breite, id, grund: y });
           }
         }
       }
-      (z.linien || []).forEach((l, i) => out.push({ punkte: l.map(([px, py]) => [px, y + py]), breite, id: `l${zeilen.indexOf(z)}-${i}` }));
+      (z.linien || []).forEach((l, i) => out.push({ punkte: l.map(([px, py]) => [dx + px, y + py]), breite, id: `l${z.nr}-${i}` }));
       return out;
     };
     const RASTER = 1.2;                                  // Breite der Prüfstreifen in pt
@@ -589,7 +750,7 @@ export class Handschrift {
         const pts = s.punkte;
         for (let i = 0; i < pts.length; i++) {
           merke(pts[i][0], pts[i][1] + (unten ? r : -r));
-          if (i) {                                       // lange Strecken (Bruch-/Unterstriche) abtasten
+          if (i) {                                       // lange Strecken (Bruch-/Unterstriche, senkrechte Striche) abtasten
             const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
             const n = Math.ceil(Math.hypot(bx - ax, by - ay) / RASTER);
             for (let t = 1; t < n; t++) merke(ax + (bx - ax) * t / n, ay + (by - ay) * t / n + (unten ? r : -r));
@@ -598,62 +759,167 @@ export class Handschrift {
       }
       return m;
     };
-    const beruehrt = (obenProfil, untenProfile) => {
-      for (const [b, y] of obenProfil) for (const u of untenProfile) if (u.has(b) && y < u.get(b)) return true;
+    const beruehrt = (obenProfil, ...karten) => {
+      for (const [b, y] of obenProfil) for (const k of karten) if (k.has(b) && y < k.get(b)) return true;
       return false;
     };
+    const vereinen = (karte, striche) => { for (const [b, y] of profil(striche, true)) if (!(karte.get(b) >= y)) karte.set(b, y); };
+    const ueberlappt = (a, b) => a === b || (B.bahnen[a][0] < B.bahnen[b][1] && B.bahnen[b][0] < B.bahnen[a][1]);
 
-    const seiten = [];
-    let seite = [], darueber = [], k = -1, rahmen = null;      // rahmen: offener [kasten] auf dieser Seite
+    const seiten = [], sprung = o.zeilenSprung, RAHMEN_NEIGUNG = 0.003;
+    const neben = (z) => z.bahn === "neben";
+    // Je Seite: Tinte (unten) und Trennstriche (untenBalken) als tiefster Punkt je Streifen, belegte Linien,
+    // letzte Linie je Bahn (ks), letzte Hauptzeile für Nebenrechnungen.
+    let seite, unten, untenBalken, belegt, ks, kMax, letzteHaupt, spalte, dx, balken, rahmen = null;
+    const leeren = () => {
+      seite = []; unten = new Map(); untenBalken = new Map(); belegt = new Map(); ks = {}; kMax = -1;
+      letzteHaupt = -1; spalte = 0; dx = 0; balken = {};
+    };
+    leeren();
+    const basis = (bahn, f) => {                         // nächste freie Linie unter allem, was in dieser Bahn steht
+      let b = bahn === "voll" ? kMax : -1;
+      if (bahn !== "voll") for (const [n, k] of Object.entries(ks)) if (ueberlappt(n, bahn)) b = Math.max(b, k);
+      return b < 0 ? 0 : b + sprung + f;
+    };
     const rahmenSchliessen = () => {                     // handgezeichnetes Rechteck um den Kasten
       if (!rahmen) return;
-      const pad = 0.55 * xh, x0 = papier.x_links - 0.35 * xh, x1 = papier.x_rechts + 0.35 * xh;
+      const pad = 0.55 * xh, x0 = rahmen.x0 - 0.35 * xh, x1 = rahmen.x1 + 0.35 * xh;
       const y0 = rahmen.min - pad, y1 = rahmen.max + pad;
+      const neig = () => Math.max(-RAHMEN_NEIGUNG, Math.min(RAHMEN_NEIGUNG, this.zufall.gauss(0, 0.0015)));
       const striche = [
-        { punkte: handLinie(x0, x1, y0, 0.03, -1), breite, id: "rahmen" },
-        { punkte: handLinie(x0, x1, y1, 0.03, 1), breite, id: "rahmen" },
+        { punkte: handLinie(x0, x1, y0, 0.03, -1, neig()), breite, id: "rahmen" },
+        { punkte: handLinie(x0, x1, y1, 0.03, 1, neig()), breite, id: "rahmen" },
         { punkte: [[x0, y0], [x0 + this.zufall.gauss(0, 0.3), (y0 + y1) / 2], [x0 + this.zufall.gauss(0, 0.3), y1]], breite, id: "rahmen" },
         { punkte: [[x1, y0], [x1 + this.zufall.gauss(0, 0.3), (y0 + y1) / 2], [x1 + this.zufall.gauss(0, 0.3), y1]], breite, id: "rahmen" },
       ];
       seite.push(...striche);
-      darueber = [profil(striche, true), ...darueber].slice(0, 2);
+      vereinen(unten, striche);
       rahmen = null;
     };
-    const neueSeite = () => {
-      rahmenSchliessen();
-      seiten.push(seite);
-      seite = []; darueber = []; k = -1;
+    const balkenFuer = (z, y) => {                       // senkrechte Striche, die neben dieser Zeile gebraucht werden
+      const r = [], y0 = y - this.versal * xh, y1 = y + 0.45 * xh;
+      if (B.trenner != null && B.name !== "rand" && z.bahn !== "voll") r.push({ name: "trenner", x: B.trenner, y0, y1 });
+      if (z.bahn === "neben" && B.nrStrich != null) r.push({ name: "nr", x: B.nrStrich + dx, y0, y1, kasten: z.kasten });
+      return r;
     };
-    for (const z of zeilen) {
-      if (z.umbruch) { if (seite.length) neueSeite(); continue; }
-      if (rahmen && rahmen.nr !== z.kasten) rahmenSchliessen();
-      let ziel = k < 0 ? 0 : k + o.zeilenSprung + z.frei;     // freie Linien zählen einfach, auch bei „jede zweite“
-      for (;;) {
-        if (ziel >= linien.length) { neueSeite(); ziel = 0; }
-        const striche = zeichneZeile(z, linien[ziel]);
-        let pruef = striche;
-        if (z.kasten && (!rahmen || rahmen.nr !== z.kasten)) {   // erste Kastenzeile: künftige Oberkante mitprüfen
-          const lo = Math.min(linien[ziel] - this.versal * xh, ...striche.flatMap((s) => s.punkte.map(([, py]) => py)));
-          pruef = striche.concat({ punkte: [[papier.x_links - 0.5 * xh, lo - 0.55 * xh - 0.2 * xh], [papier.x_rechts + 0.5 * xh, lo - 0.55 * xh - 0.2 * xh]], breite });
-        }
-        // Lesereihenfolge: nichts darf über die Grundlinie der vorigen Zeile ragen (sonst wirkt es wie dieselbe Zeile)
-        const ueberGrundlinie = k >= 0 && Math.min(...pruef.flatMap((s) => s.punkte.map(([, py]) => py))) < linien[k] + 0.2 * xh;
-        if ((darueber.length && beruehrt(profil(pruef, false), darueber)) || ueberGrundlinie) {
-          if (ziel + 1 < linien.length) { ziel += 1; continue; }
-          neueSeite(); ziel = 0; continue;               // passt auf dieser Seite nirgends mehr
-        }
-        seite.push(...striche);
-        darueber = [profil(striche, true), darueber[0]].filter(Boolean);
-        if (z.kasten) {
-          const ys = striche.flatMap((s) => s.punkte.map(([, py]) => py));
-          const lo = Math.min(linien[ziel] - this.versal * xh, ...ys), hi = Math.max(linien[ziel] + 0.6 * xh, ...ys);
-          rahmen = rahmen ? { ...rahmen, min: Math.min(rahmen.min, lo), max: Math.max(rahmen.max, hi) } : { nr: z.kasten, min: lo, max: hi };
-        }
-        k = ziel;
-        break;
+    const balkenZeichnen = (name) => {
+      const b = balken[name];
+      if (!b) return;
+      seite.push({ punkte: senkrecht(b.x, b.y0, b.y1), breite, id: `b-${name}-${b.y0.toFixed(1)}` });
+      delete balken[name];
+    };
+    const balkenSetzen = (liste, ziel) => {
+      for (const r of liste) {
+        const a = balken[r.name];                        // Nebenrechnungen: ein Strich je zusammenhängendem Block
+        if (a && r.name === "nr" && (ziel > a.k + sprung || Math.abs(a.x - r.x) > 0.5 || a.kasten !== r.kasten)) balkenZeichnen(r.name);
+        const b = balken[r.name];
+        balken[r.name] = b ? { ...b, y0: Math.min(b.y0, r.y0), y1: Math.max(b.y1, r.y1), k: ziel } : { ...r, k: ziel };
       }
+    };
+    const seiteAbschliessen = () => {
+      rahmenSchliessen();
+      for (const name of Object.keys(balken)) balkenZeichnen(name);
+      if (B.name === "rand" && seite.length) {           // Rand über die ganze Seite
+        seite.push({ punkte: senkrecht(B.trenner, linien[0] - this.versal * xh - 0.4 * xh, linien[linien.length - 1] + 0.5 * xh), breite, id: "rand" });
+      }
+    };
+    const neueSeite = () => { seiteAbschliessen(); seiten.push(seite); leeren(); };
+    const spalteWechseln = () => {                       // Zwei Spalten: rechts oben weiter
+      rahmenSchliessen();
+      balkenZeichnen("nr");
+      spalte = 1; dx = B.spalteDx; letzteHaupt = -1;
+      ks = ks.voll >= 0 ? { voll: ks.voll } : {};
+    };
+    const kastenBreite = new Map();                      // ganze Breite je Kasten (auch mit Nebenrechnung darin)
+    for (const z of zeilen) {
+      if (!z.kasten || (B.name === "rand" && neben(z))) continue;
+      const [a, b] = kastenBreite.get(z.kasten) ?? [Infinity, -Infinity];
+      kastenBreite.set(z.kasten, [Math.min(a, z.x0), Math.max(b, z.x1)]);
     }
-    rahmenSchliessen();
+    // Eine Zeile auf die erste passende Linie legen; mindestens() = frühestens diese Linie. Liefert die Linie.
+    const platzieren = (z, mindestens = () => -1, frei = z.frei) => {
+      if (rahmen && rahmen.nr !== z.kasten && z.bahn !== "stichwort") rahmenSchliessen();
+      const zielVon = () => {
+        let ziel = Math.max(basis(z.bahn, frei), mindestens());
+        if (z.anker === "vorher" && letzteHaupt >= 0) ziel = Math.max(ziel, letzteHaupt);   // Nebenrechnung neben ihre Zeile
+        return ziel;
+      };
+      let ziel = zielVon();
+      for (;;) {
+        if (ziel >= linien.length) {                     // passt auf dieser Seite (Spalte) nirgends mehr
+          if (B.spalteDx && spalte === 0 && z.bahn !== "voll") spalteWechseln(); else neueSeite();
+          ziel = zielVon();
+          continue;
+        }
+        const y = linien[ziel];
+        const striche = zeichneZeile(z, y, dx);
+        let pruef = striche;
+        const imRahmen = z.kasten && !(B.name === "rand" && neben(z));   // Nebenrechnungen im Rand stehen außerhalb
+        const [x0, x1] = (imRahmen ? kastenBreite.get(z.kasten) : [z.x0, z.x1]).map((v) => v + dx);
+        if (imRahmen && (!rahmen || rahmen.nr !== z.kasten)) {   // erste Kastenzeile: künftige Oberkante mitprüfen
+          const lo = Math.min(y - this.versal * xh, ...striche.flatMap((s) => s.punkte.map(([, py]) => py)));
+          const yk = lo - 0.75 * xh - RAHMEN_NEIGUNG * (x1 - x0 + 2 * xh);   // auch wenn der Strich etwas schräg läuft
+          pruef = striche.concat({ punkte: [[x0 - 0.5 * xh, yk], [x1 + 0.5 * xh, yk]], breite });
+        }
+        const balkenHier = striche.length ? balkenFuer(z, y) : [];
+        const balkenStriche = balkenHier.map((b) => ({ punkte: [[b.x, b.y0], [b.x, b.y1]], breite }));
+        // Lesereihenfolge: nichts darf über die Grundlinie der vorigen Zeile derselben Lesespalte ragen
+        // (sonst wirkt es wie dieselbe Zeile); Zeilen über die ganze Breite zählen für alle Spalten.
+        const spur = `${neben(z) || z.bahn === "stichwort" ? z.bahn : "haupt"}${spalte}`;
+        const zaehlt = (v) => z.bahn === "voll" ? [...belegt.values()].some((b) => b.has(v)) : belegt.get(spur)?.has(v) || belegt.get("voll")?.has(v);
+        let vor = ziel - 1;
+        while (vor >= 0 && !zaehlt(vor)) vor--;
+        const ys = pruef.flatMap((s) => s.punkte.map(([, py]) => py));
+        const ueberGrundlinie = vor >= 0 && ys.length > 0 && Math.min(...ys) < linien[vor] + 0.2 * xh;
+        if (ueberGrundlinie || beruehrt(profil(pruef, false), unten, untenBalken) || beruehrt(profil(balkenStriche, false), unten)) {
+          ziel += 1;
+          continue;
+        }
+        for (const s of striche) if (s.grund != null) s.spur = spur;   // für die Tests
+        seite.push(...striche);
+        vereinen(unten, striche);
+        vereinen(untenBalken, balkenStriche);
+        balkenSetzen(balkenHier, ziel);
+        for (const s of z.bahn === "voll" ? [spur, "voll"] : [spur]) {
+          if (!belegt.has(s)) belegt.set(s, new Set());
+          belegt.get(s).add(ziel);
+        }
+        ks[z.bahn] = Math.max(ks[z.bahn] ?? -1, ziel);
+        kMax = Math.max(kMax, ziel);
+        if (z.bahn !== "neben" && z.bahn !== "stichwort") letzteHaupt = ziel;
+        if (imRahmen) {
+          const tinte = striche.flatMap((s) => s.punkte.map(([, py]) => py));
+          const lo = Math.min(y - this.versal * xh, ...tinte), hi = Math.max(y + 0.6 * xh, ...tinte);
+          rahmen = rahmen ? { ...rahmen, min: Math.min(rahmen.min, lo), max: Math.max(rahmen.max, hi), x0: Math.min(rahmen.x0, x0), x1: Math.max(rahmen.x1, x1) }
+            : { nr: z.kasten, min: lo, max: hi, x0, x1 };
+        }
+        return ziel;
+      }
+    };
+    // Cornell: ein Stichwort wartet auf seinen Inhalt und kommt dann genau auf dessen erste Linie.
+    let wartend = [];
+    const stichwortSetzen = (inhaltLinie = null) => {
+      wartend.forEach((c, i) => platzieren(c, () => (i ? -1 : inhaltLinie ?? basis("haupt", c.frei))));
+      wartend = [];
+    };
+    for (const [nr, z] of zeilen.entries()) {
+      z.nr = nr;
+      if (z.bahn === "stichwort") {
+        if (z.anker === "nachher" && wartend.length) stichwortSetzen();
+        wartend.push(z);
+        continue;
+      }
+      if (wartend.length && (z.bahn === "haupt" || z.bahn === "schmal")) {
+        const erstes = wartend[0];
+        stichwortSetzen(platzieren(z, () => basis("stichwort", erstes.frei), Math.max(z.frei, erstes.frei)));
+        continue;
+      }
+      if (wartend.length) stichwortSetzen();
+      if (z.umbruch) { if (seite.length) neueSeite(); continue; }
+      platzieren(z);
+    }
+    stichwortSetzen();
+    seiteAbschliessen();
     if (seite.length) seiten.push(seite);
     return seiten;
   }
@@ -667,10 +933,13 @@ export class Handschrift {
     const stuecke = [];
     let rest = [...tok];
     while (rest.length) {
-      let n = rest.length;
-      while (n > 1 && this.wort(rest.slice(0, n).join("") + (n < rest.length ? "-" : ""))[1] > platz) n--;
-      const teil = rest.slice(0, n).join("") + (n < rest.length ? "-" : "");
-      stuecke.push(this.wort(teil));
+      let n = rest.length, stueck;
+      for (;;) {                                         // das gemessene Stück behalten (neu erzeugt wäre es anders breit)
+        stueck = this.wort(rest.slice(0, n).join("") + (n < rest.length ? "-" : ""));
+        if (n <= 1 || stueck[1] <= platz) break;
+        n--;
+      }
+      stuecke.push(stueck);
       rest = rest.slice(n);
     }
     return stuecke;
@@ -681,11 +950,17 @@ export class Handschrift {
 
 export const VOREINSTELLUNGEN = {
   kompakt: { abstandStichpunkte: false, abstandUeberschrift: false, unterstreichen: true, zeilenSprung: 1, groesse: 0.95,
-             wortabstand: 0.85, buchstabenabstand: 0.95, gliedern: false },
+             wortabstand: 0.85, buchstabenabstand: 0.95 },
   normal: { abstandStichpunkte: true, abstandUeberschrift: true, unterstreichen: true, zeilenSprung: 1, groesse: 1.0,
-            wortabstand: 1.0, buchstabenabstand: 1.0, gliedern: false },
+            wortabstand: 1.0, buchstabenabstand: 1.0 },
   luftig: { abstandStichpunkte: true, abstandUeberschrift: true, unterstreichen: true, zeilenSprung: 2, groesse: 1.0,
-            wortabstand: 1.15, buchstabenabstand: 1.05, gliedern: false },
+            wortabstand: 1.15, buchstabenabstand: 1.05 },
+};
+
+// Layout und Gliederung – unabhängig vom Platz-Preset. Die gl_*-Regeln wirken nur, wenn „gliedern“ an ist.
+export const GLIEDERUNG = {
+  layout: "standard", gliedern: false, gl_ueberschriften: true, gl_saetze: true, gl_aufzaehlungen: true, gl_begriffe: true,
+  gl_merke: true, gl_neben: true, gl_ergebnis: true, gl_ausrichten: true,
 };
 
 const ABKUERZUNG = /(?:\b(?:z\.\s?B|d\.\s?h|u\.\s?a|bzw|ca|usw|vgl|Nr|Art|Abs|ggf|evtl|bspw|inkl|etc|Dr|Prof|St|S|Mio|Mrd|Jh|v\.\s?Chr|n\.\s?Chr)|\d)\.$/;
@@ -705,14 +980,122 @@ function saetzeTeilen(t) {
   return saetze.filter(Boolean);
 }
 
-// Ohne KI: Absätze aus mehreren Sätzen werden zu Stichpunkten (ein Satz je Punkt); Überschriften,
-// vorhandene Stichpunkte und einzelne Sätze bleiben, wie sie sind.
-export function gliedern(text) {
-  return text.split("\n").map((zeile) => {
-    if (!zeile.trim() || ueberschriftErkennen(zeile) || stichpunktErkennen(zeile)) return zeile;
-    const saetze = saetzeTeilen(zeile.trim());
-    return saetze.length > 1 ? saetze.map((s) => `- ${s}`).join("\n") : zeile;
-  }).join("\n");
+const MERKWORT = /^(merke|wichtig|achtung|beachte|definition|def\.?|satz|regel|hinweis|tipp|gesetz|lehrsatz)\s*:/i;
+const BUCHSTABE = /[A-Za-zÄÖÜäöüßα-ωΔΣΩπ]/;
+const ERGEBNIS = /^\$?\s*(?:[A-Za-zα-ωΔ](?:_\{?\w+\}?|\(\w\))?\s*)?[=≈]\s*[-−+]?\s*\d[\d.,]*\s*(?:[a-zA-Zµ°€%]{1,4}[²³]?)?\s*\$?\s*\.?$|^L\s*=\s*\{[^}]*\}$/;
+const sonderzeile = (z) => BEFEHL.test(z) || PRAEFIX.test(z) || /^\s*([-*_])\1{2,}\s*$/.test(z) || /^\s*\$\$/.test(z);
+
+// Rechnung: Gleichung/Ungleichung mit höchstens einem richtigen Wort („Lösung: x = 5“, „A = 12 · 7,5“).
+function istRechnung(t) {
+  const s = t.replace(/==/g, "");
+  if (!/[=≈≤≥≠<>]/.test(s)) return false;
+  return (s.replace(/\\[a-zA-Z]+/g, "").match(/[A-Za-zÄÖÜäöüß]{4,}/g) || []).length <= 1;
+}
+// Reine Zahlenrechnung ohne Variablen, z. B. „12 · 7,5 = 90“ – typisch für Nebenrechnungen.
+const nurZahlen = (t) => /^[\d\s.,+\-−·*×:/=≈()%]+$/.test(t) && t.includes("=") && /[+\-−·*×:/]/.test(t.replace(/^\s*[-−]/, ""));
+
+// Ohne KI, nur mit festen Regeln (jede einzeln abschaltbar):
+// Nebenrechnungen erkennen, Ergebnisse doppelt unterstreichen, Merksätze einrahmen, Überschriften erkennen,
+// Aufzählungen im Satz zu Stichpunkten, Absätze aus mehreren Sätzen zu Stichpunkten, Fachbegriffe unterstreichen.
+export function gliedern(text, regeln = GLIEDERUNG) {
+  const an = (k) => regeln[k] !== false;
+  let z = text.split("\n");
+  const ue = (l) => ueberschriftErkennen(l);
+  const normal = (l) => l.trim() && !sonderzeile(l) && !ue(l);   // gewöhnliche Text- oder Stichpunktzeile
+
+  if (an("gl_neben") || an("gl_ergebnis")) {             // Rechnungen absatzweise
+    const bloecke = [];
+    let block = [];
+    z.forEach((l, i) => { if (!l.trim() || BEFEHL.test(l) || ue(l)) { if (block.length) bloecke.push(block); block = []; } else block.push(i); });
+    if (block.length) bloecke.push(block);
+    for (const b of bloecke) {
+      let variable = false;
+      const haupt = [];
+      for (const i of b) {
+        const t = z[i].trim();
+        if (PRAEFIX.test(t) || NEBENRECHNUNG.test(t)) continue;
+        const ohneKlammer = /^\((.*)\)$/.exec(t)?.[1].trim() ?? t;
+        if (an("gl_neben") && variable && nurZahlen(ohneKlammer)) { z[i] = `[neben] ${ohneKlammer}`; continue; }
+        if (!istRechnung(t)) continue;
+        haupt.push(i);
+        if (BUCHSTABE.test(t.replace(/\\[a-zA-Z]+/g, ""))) variable = true;
+      }
+      const letzte = haupt[haupt.length - 1];
+      if (an("gl_ergebnis") && haupt.length >= 2 && ERGEBNIS.test(z[letzte].trim())) z[letzte] = `[ergebnis] ${z[letzte].trim()}`;
+    }
+  }
+
+  if (an("gl_merke")) {                                  // „Merke: …“, „Definition: …“ → Kasten
+    const aus = [];
+    let imKasten = false;
+    for (let i = 0; i < z.length; i++) {
+      const t = z[i].trim();
+      if (/^\[kasten\]$/i.test(t)) imKasten = true;
+      if (/^\[\/kasten\]$/i.test(t)) imKasten = false;
+      if (imKasten || !MERKWORT.test(t)) { aus.push(z[i]); continue; }
+      const nurWort = /:\s*$/.test(t);                   // „Merke:“ allein: bis zur Leerzeile; sonst nur folgende Stichpunkte
+      let j = i + 1;
+      while (j < z.length && z[j].trim() && !sonderzeile(z[j]) && !/^#/.test(z[j].trim()) && !MERKWORT.test(z[j].trim())
+             && (nurWort || stichpunktErkennen(z[j]))) j++;
+      aus.push("[kasten]", ...z.slice(i, j), "[/kasten]");
+      i = j - 1;
+    }
+    z = aus;
+  }
+
+  if (an("gl_ueberschriften")) {                         // kurze Zeile vor einem Absatz → Überschrift
+    const kurz = (t) => /^[A-ZÄÖÜ]/.test(t) && t.length <= 50 && t.split(/\s+/).length <= 6 && /[A-Za-zÄÖÜäöüß]{3}/.test(t)
+      && !/[.!?,;:…]$/.test(t) && !/[=$|]/.test(t);
+    const erste = z.findIndex((l) => l.trim() && !BEFEHL.test(l));      // erste Zeile mit Inhalt → Titel
+    const genug = z.filter(normal).length >= 4;
+    z = z.map((l, i) => {
+      const t = l.trim();
+      if (!normal(l) || stichpunktErkennen(l) || !kurz(t)) return l;
+      if (i === erste && genug) return `# ${t}`;
+      const davor = i === 0 || !z[i - 1].trim() || BEFEHL.test(z[i - 1]);
+      const nach = z[i + 1] ?? "";
+      const absatz = normal(nach) && (stichpunktErkennen(nach) || nach.trim().split(/\s+/).length >= 5 || istRechnung(nach));
+      return davor && absatz ? `## ${t}` : l;
+    });
+  }
+
+  if (an("gl_aufzaehlungen")) {                          // „Es gibt drei Arten: A, B und C.“ → Stichpunkte
+    z = z.flatMap((l) => {
+      if (!normal(l)) return [l];
+      const sp = stichpunktErkennen(l);
+      const m = /^([^:$=]{3,80}):\s+(.+?)\.?$/.exec(sp ? sp.text : l.trim());
+      if (!m || !/,\s/.test(m[2])) return [l];
+      const teile = m[2].split(/,\s+|\s+(?:und|oder|sowie)\s+/).map((s) => s.trim()).filter(Boolean);
+      if (teile.length < 3 || teile.some((s) => s.split(/\s+/).length > 4 || /[.!?;=$:]/.test(s))) return [l];
+      const ebene = sp ? sp.ebene : 0;
+      const unter = "  ".repeat(sp ? ebene + 1 : 0);
+      return [sp ? `${"  ".repeat(ebene)}${sp.marke} ${m[1]}:` : `${m[1]}:`, ...teile.map((s) => `${unter}- ${s}`)];
+    });
+  }
+
+  if (an("gl_saetze")) {                                 // Absatz aus mehreren Sätzen → ein Stichpunkt je Satz
+    let imKasten = false;
+    z = z.flatMap((l) => {
+      if (/^\s*\[kasten\]\s*$/i.test(l)) imKasten = true;
+      if (/^\s*\[\/kasten\]\s*$/i.test(l)) imKasten = false;
+      if (imKasten || !normal(l) || stichpunktErkennen(l) || istRechnung(l) || MERKWORT.test(l.trim())) return [l];
+      const saetze = saetzeTeilen(l.trim());
+      return saetze.length > 1 ? saetze.map((s) => `- ${s}`) : [l];
+    });
+  }
+
+  if (an("gl_begriffe")) {                               // „Zellkern: enthält die DNA“ → Begriff unterstreichen
+    z = z.map((l) => {
+      if (!normal(l)) return l;
+      const sp = stichpunktErkennen(l);
+      const t = sp ? sp.text : l.trim();
+      const m = /^([A-ZÄÖÜ][\wäöüßÄÖÜ-]*(?: [\wäöüßÄÖÜ-]+){0,2})(:\s+|\s[-–]\s+)(\S.*)$/.exec(t);
+      if (!m || MERKWORT.test(`${m[1]}:`) || m[3].split(/\s+/).length < 2 || !BUCHSTABE.test(m[3]) || istRechnung(m[3])) return l;
+      const neu = `==${m[1]}==${m[2].includes(":") ? ": " : " – "}${m[3]}`;
+      return sp ? `${"  ".repeat(sp.ebene)}${sp.marke} ${neu}` : neu;
+    });
+  }
+  return z.join("\n");
 }
 
 // --- GoodNotes-Datei ------------------------------------------------------------------

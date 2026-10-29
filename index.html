@@ -76,9 +76,22 @@
         </div>
       </div>
       <div class="gruppe">
-        <span class="etikett" id="layout-etikett">Platz</span>
+        <span class="etikett" id="layout-etikett">Layout</span>
+        <div class="umschalter" role="radiogroup" aria-labelledby="layout-etikett" data-gruppe="layout">
+          <button type="button" role="radio" data-wert="standard" title="Text über die ganze Breite, Nebenrechnungen rechts daneben">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 10h16M4 14h16M4 18h10"/></svg>Standard</button>
+          <button type="button" role="radio" data-wert="spalten" title="Zwei Spalten nebeneinander">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 6h6M15 6h6M3 10h6M15 10h6M3 14h6M15 14h4M3 18h4"/></svg>Zwei Spalten</button>
+          <button type="button" role="radio" data-wert="cornell" title="Cornell-Notizen: Stichwörter links, Notizen rechts, Zusammenfassung unten">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v14M3 17h18M3 6h3M12 6h9M12 10h9M3 10h3M12 14h6M5 20h12"/></svg>Cornell</button>
+          <button type="button" role="radio" data-wert="rand" title="Heft mit Rand: Nebenrechnungen in den Rand">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3v18M3 6h10M3 10h10M3 14h10M3 18h7M18 9h3"/></svg>Mit Rand</button>
+        </div>
+      </div>
+      <div class="gruppe">
+        <span class="etikett" id="platz-etikett">Platz</span>
         <div class="layout-zeile">
-          <div class="umschalter" role="radiogroup" aria-labelledby="layout-etikett" data-gruppe="preset">
+          <div class="umschalter" role="radiogroup" aria-labelledby="platz-etikett" data-gruppe="preset">
             <button type="button" role="radio" data-wert="kompakt">Kompakt</button>
             <button type="button" role="radio" data-wert="normal">Normal</button>
             <button type="button" role="radio" data-wert="luftig">Luftig</button>
@@ -104,7 +117,18 @@
       <div class="spalte">
         <span class="etikett">Gliederung</span>
         <label class="schalter"><input data-option="unterstreichen" type="checkbox"><span></span>Überschriften unterstreichen</label>
-        <label class="schalter"><input data-option="gliedern" type="checkbox"><span></span><em class="text">Automatisch gliedern<small>Absätze → ein Stichpunkt je Satz</small></em></label>
+        <label class="schalter"><input data-option="gliedern" type="checkbox"><span></span><em class="text">Intelligent gliedern<small>Feste Regeln, ohne KI – einzeln abschaltbar</small></em></label>
+        <fieldset id="gliederung-regeln" class="regel-liste">
+          <legend class="unsichtbar">Regeln der Gliederung</legend>
+          <label><input data-option="gl_ueberschriften" type="checkbox"> Überschriften erkennen</label>
+          <label><input data-option="gl_saetze" type="checkbox"> Sätze als Stichpunkte</label>
+          <label><input data-option="gl_aufzaehlungen" type="checkbox"> Aufzählungen auflösen</label>
+          <label><input data-option="gl_begriffe" type="checkbox"> Fachbegriffe unterstreichen</label>
+          <label><input data-option="gl_merke" type="checkbox"> Merksätze einrahmen</label>
+          <label><input data-option="gl_neben" type="checkbox"> Nebenrechnungen daneben</label>
+          <label><input data-option="gl_ergebnis" type="checkbox"> Ergebnis doppelt unterstreichen</label>
+          <label><input data-option="gl_ausrichten" type="checkbox"> Rechnungen am = ausrichten</label>
+        </fieldset>
       </div>
       <div class="spalte">
         <span class="etikett">Schrift</span>
@@ -129,6 +153,9 @@
             <dt><code>$x^2 + 1$</code> · <code>a_1</code></dt><dd>Formel mit Hochzahl/Index – <code>x^2</code> geht auch ohne $.</dd>
             <dt><code>$\frac{a}{b}$</code> · <code>$a/b$</code> · <code>$\sqrt{x}$</code></dt><dd>Bruch und Wurzel (die Wurzel wächst mit dem Inhalt).</dd>
             <dt><code>\pm \cdot \le \ne \pi \alpha</code></dt><dd>± · ≤ ≠ π α – im Formelteil.</dd>
+            <dt><code>NR: 12 · 8 = 96</code> · <code>[neben] …</code></dt><dd>Nebenrechnung – steht rechts neben der Rechnung (bei „Mit Rand“ im Rand).</dd>
+            <dt><code>[ergebnis] x = 5</code></dt><dd>Ergebnis doppelt unterstrichen.</dd>
+            <dt><code>3x = 15 | :3</code></dt><dd>Umformung – mit „Intelligent gliedern“ stehen = und | bündig untereinander.</dd>
           </dl>
         </details>
       </section>

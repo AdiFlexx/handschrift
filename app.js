@@ -1,4 +1,4 @@
-import { Handschrift, goodnotesDatei, VOREINSTELLUNGEN, anweisungenLesen, anweisungenAnwenden } from "./handschrift.js";
+import { Handschrift, goodnotesDatei, VOREINSTELLUNGEN, GLIEDERUNG, LAYOUTS, anweisungenLesen, anweisungenAnwenden } from "./handschrift.js";
 import { trainingEinrichten, eigeneLaden, mitEigenen } from "./training.js";
 import { REGELBLATT } from "./regelblatt.js";
 
@@ -6,7 +6,7 @@ const $ = (id) => document.getElementById(id);
 const SPEICHER = { schluessel: "handschrift-schluessel", entwurf: "handschrift-entwurf" };
 const TINTE = "#15181f";
 
-const zustand = { daten: null, art: "kariert-klein", format: "A4", preset: "normal", optionen: { ...VOREINSTELLUNGEN.normal },
+const zustand = { daten: null, art: "kariert-klein", format: "A4", preset: "normal", optionen: { ...VOREINSTELLUNGEN.normal, ...GLIEDERUNG },
                   seed: neuerSeed(), seiten: [], seite: 0, papier: null };
 const bilder = new Map();                                // Papierhintergründe, einmal geladen
 
@@ -80,7 +80,7 @@ function oeffnen(daten) {
   const entwurf = lies(SPEICHER.entwurf, {});
   zustand.art = entwurf.art ?? zustand.art;
   zustand.format = entwurf.format ?? zustand.format;
-  zustand.optionen = { ...VOREINSTELLUNGEN.normal, ...(entwurf.optionen ?? {}) };
+  zustand.optionen = { ...VOREINSTELLUNGEN.normal, ...GLIEDERUNG, ...(entwurf.optionen ?? {}) };
   zustand.preset = passendesPreset();
   for (const feld of document.querySelectorAll("[data-option]")) {       // Einzel-Einstellungen
     feld.addEventListener("input", () => {
@@ -105,10 +105,12 @@ function oeffnen(daten) {
       const knopf = e.target.closest("button");
       if (!knopf || knopf.hidden) return;
       const art = gruppe.dataset.gruppe, wert = knopf.dataset.wert;
-      if (art === "preset") {
+      if (art === "preset") {                            // Platz-Preset ändert nur Abstände/Größe, nicht Layout und Gliederung
         if (!VOREINSTELLUNGEN[wert]) return;
-        zustand.optionen = { ...VOREINSTELLUNGEN[wert] };
+        zustand.optionen = { ...zustand.optionen, ...VOREINSTELLUNGEN[wert] };
         zustand.preset = wert;
+      } else if (art === "layout") {
+        zustand.optionen.layout = wert;
       } else if (art === "zeilenSprung") {
         zustand.optionen.zeilenSprung = Number(wert);
         zustand.preset = passendesPreset();
@@ -154,7 +156,8 @@ function passendesPreset() {
 }
 
 function einstellungenZeigen() {
-  const werte = { art: zustand.art, format: zustand.format, preset: zustand.preset, zeilenSprung: String(zustand.optionen.zeilenSprung) };
+  const werte = { art: zustand.art, format: zustand.format, preset: zustand.preset, layout: zustand.optionen.layout,
+                  zeilenSprung: String(zustand.optionen.zeilenSprung) };
   for (const gruppe of document.querySelectorAll(".umschalter")) {
     for (const knopf of gruppe.querySelectorAll("button")) {
       knopf.setAttribute("aria-checked", String(knopf.dataset.wert === werte[gruppe.dataset.gruppe]));
@@ -166,6 +169,7 @@ function einstellungenZeigen() {
     if (feld.type === "checkbox") feld.checked = wert; else feld.value = wert;
   }
   for (const a of document.querySelectorAll("[data-anzeige]")) a.textContent = `${Math.round(zustand.optionen[a.dataset.anzeige] * 100)} %`;
+  $("gliederung-regeln").disabled = !zustand.optionen.gliedern;
   const name = `${zustand.art}_${zustand.format}`;
   zustand.papier = zustand.daten.papiere.find((p) => p.name === name) ?? zustand.daten.papiere[0];
 }
@@ -202,7 +206,7 @@ function neuSetzen() {
   const fehlend = [...hand.fehlend];
   const n = zustand.seiten.length;
   status(fehlend.length ? `Nicht in deiner Schrift vorhanden, weggelassen: ${fehlend.join(" ")}`
-    : n ? `${n} ${n === 1 ? "Seite" : "Seiten"} · ${zustand.papier.anzeige}${vonText ? " · Einstellungen aus dem Text" : ""}`
+    : n ? `${n} ${n === 1 ? "Seite" : "Seiten"} · ${zustand.papier.anzeige}${zustand.optionen.layout !== "standard" ? ` · ${LAYOUTS[zustand.optionen.layout]}` : ""}${vonText ? " · Einstellungen aus dem Text" : ""}`
       : "Nichts Schreibbares im Text.", fehlend.length > 0 || !n);
   zeichnen();
 }
