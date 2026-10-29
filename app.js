@@ -51,7 +51,7 @@ async function start() {
   }
   $("sperre-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const knopf = e.submitter;
+    const knopf = e.submitter ?? e.target.querySelector("button"); // ohne Knopf abgeschickt (Eingabetaste) gibt es keinen submitter
     knopf.disabled = true;
     $("sperre-fehler").textContent = "";
     try {

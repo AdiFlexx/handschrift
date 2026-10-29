@@ -178,6 +178,8 @@ textarea { flex: 1; min-height: 300px; resize: vertical; line-height: 1.6; }
   border-radius: 20px; background: var(--karte); color: var(--tinte); box-shadow: 0 30px 80px rgba(0, 0, 0, .35);
 }
 .fenster::backdrop { background: rgba(20, 18, 12, .45); backdrop-filter: blur(3px); }
+#training, #training * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }   /* nie markieren */
+body.training-offen { -webkit-user-select: none; user-select: none; overflow: hidden; }
 .fenster-kopf, .fenster-fuss { display: flex; align-items: center; gap: 10px; padding: 14px 18px; }
 .fenster-kopf { border-bottom: 1px solid var(--rand); justify-content: space-between; }
 .fenster-kopf h2 { margin: 0; font-family: var(--serif); font-size: 22px; }
@@ -188,7 +190,7 @@ textarea { flex: 1; min-height: 300px; resize: vertical; line-height: 1.6; }
 .hinweis { margin: 0; color: var(--gedaempft); }
 .vorlage { margin: 0; white-space: pre-line; line-height: 1.25; text-align: center; font-family: var(--serif); font-size: clamp(28px, 5vw, 44px); letter-spacing: .06em; }
 .schreibfeld {
-  width: 100%; height: 300px; border-radius: 14px; border: 1px solid var(--rand); background: #fffefb;
+  width: 100%; height: 170px; border-radius: 14px; border: 1px solid var(--rand); background: #fffefb;
   touch-action: none; cursor: crosshair; display: block;
 }
 .kacheln { display: flex; flex-wrap: wrap; gap: 10px; }

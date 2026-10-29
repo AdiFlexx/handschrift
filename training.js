@@ -33,10 +33,23 @@ function eigeneSpeichern(eigene) {
   try { localStorage.setItem(SPEICHER_EIGENE, JSON.stringify(eigene)); return true; } catch { return false; }
 }
 
-// Bibliothek + eigene Varianten zusammenführen.
+// Feste Kennung je trainiertem Zeichen (FNV-1a) – damit übernommene Zeichen nicht doppelt zählen.
+export function kennung(c, striche) {
+  let h = 2166136261;
+  const s = c + JSON.stringify(striche);
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return "t" + (h >>> 0).toString(16);
+}
+
+// Bibliothek + eigene Varianten zusammenführen (bereits übernommene oder bei der Prüfung verworfene werden übersprungen).
 export function mitEigenen(daten, eigene) {
+  const vorhanden = new Set([...Object.values(daten.glyphen).flat().map((g) => g.id).filter(Boolean),
+    ...(daten.verworfen ?? [])]);
   const glyphen = { ...daten.glyphen };
-  for (const [c, liste] of Object.entries(eigene)) glyphen[c] = [...(glyphen[c] ?? []), ...liste];
+  for (const [c, liste] of Object.entries(eigene)) {
+    const neu = liste.filter((g) => !vorhanden.has(g.id ?? kennung(c, g.striche)));
+    if (neu.length) glyphen[c] = [...(glyphen[c] ?? []), ...neu];
+  }
   return { ...daten, glyphen };
 }
 
@@ -164,14 +177,24 @@ export function trainingEinrichten({ daten, zaehlerAus, geaendert, teilen }) {
   const $ = (id) => document.getElementById(id);
   const dialog = $("training"), canvas = $("tr-canvas");
   let striche = [], aktuell = null, vorlage = "", teile = [""], ergebnis = null;
-  const GRUENDE = [0.40, 0.84], XH = 0.13, GRENZE = 0.62;    // zwei Schreibzeilen, Hilfslinien relativ zur Feldhöhe
+  // Zwei Schreibzeilen in Alltagsgröße (x-Höhe ≈ 14 px) – so wird trainiert, wie Adrian wirklich schreibt.
+  const GRUENDE = [0.42, 0.84], XH = 0.085, GRENZE = 0.63;
 
   const masse = () => ({ w: canvas.clientWidth, h: canvas.clientHeight });
-  const zeichnen = () => {
+  let ctx = null, rect = null;
+  const vorbereiten = () => {                                // Leinwand an Größe/Pixeldichte anpassen
     const { w, h } = masse(), dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== Math.round(w * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); }
-    const ctx = canvas.getContext("2d");
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    }
+    ctx = canvas.getContext("2d", { desynchronized: true }); // geringe Latenz beim Schreiben
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.lineCap = ctx.lineJoin = "round";
+  };
+  const tinte = () => { ctx.strokeStyle = "#15181f"; ctx.lineWidth = 2.2; };
+  const zeichnen = () => {                                   // komplett neu (Rückgängig, Leeren, Größe geändert)
+    vorbereiten();
+    const { w, h } = masse();
     ctx.clearRect(0, 0, w, h);
     GRUENDE.slice(0, teile.length).forEach((g) => {
       ctx.strokeStyle = "#c9d3e3"; ctx.lineWidth = 1.2;
@@ -180,7 +203,7 @@ export function trainingEinrichten({ daten, zaehlerAus, geaendert, teilen }) {
       ctx.beginPath(); ctx.moveTo(12, h * (g - XH)); ctx.lineTo(w - 12, h * (g - XH)); ctx.stroke();
       ctx.setLineDash([]);
     });
-    ctx.strokeStyle = "#15181f"; ctx.lineWidth = 2.4; ctx.lineCap = ctx.lineJoin = "round";
+    tinte();
     for (const s of [...striche, aktuell].filter(Boolean)) {
       ctx.beginPath();
       s.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
@@ -188,25 +211,50 @@ export function trainingEinrichten({ daten, zaehlerAus, geaendert, teilen }) {
       ctx.stroke();
     }
   };
-  const punkt = (e) => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  // Beim Schreiben nur das neue Stück zeichnen, gebündelt pro Bildschirmbild – kommt auch bei schnellem Schreiben mit.
+  let gezeichnet = 0, bildAngefordert = false;
+  const nachzeichnen = () => {
+    bildAngefordert = false;
+    if (!aktuell || !ctx) return;
+    tinte();
+    ctx.beginPath();
+    const von = Math.max(0, gezeichnet - 1);
+    aktuell.slice(von).forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    if (aktuell.length === 1) ctx.lineTo(aktuell[0][0] + 0.1, aktuell[0][1]);
+    ctx.stroke();
+    gezeichnet = aktuell.length;
+  };
+  const anfordern = () => { if (!bildAngefordert) { bildAngefordert = true; requestAnimationFrame(nachzeichnen); } };
+  const punkt = (e) => [e.clientX - rect.left, e.clientY - rect.top];
   const erlaubt = (e) => e.pointerType === "pen" || e.pointerType === "mouse" || $("tr-finger").checked;
   canvas.addEventListener("pointerdown", (e) => {
     if (!erlaubt(e)) return;
     e.preventDefault();
     try { canvas.setPointerCapture(e.pointerId); } catch { /* ohne Capture geht es auch */ }
+    if (aktuell) striche.push(aktuell);                      // falls ein Ende verloren ging
+    if (!ctx) vorbereiten();
+    rect = canvas.getBoundingClientRect();
     aktuell = [punkt(e)];
-    zeichnen();
+    gezeichnet = 0;
+    anfordern();
   });
   canvas.addEventListener("pointermove", (e) => {
     if (!aktuell || !erlaubt(e)) return;
     e.preventDefault();
     const feine = e.getCoalescedEvents?.() ?? [];           // kann leer sein – dann das Ereignis selbst nehmen
     for (const ev of feine.length ? feine : [e]) aktuell.push(punkt(ev));
-    zeichnen();
+    anfordern();
   });
-  const ende = () => { if (aktuell) { striche.push(aktuell); aktuell = null; zeichnen(); } };
+  const ende = () => { if (aktuell) { nachzeichnen(); striche.push(aktuell); aktuell = null; } };
   canvas.addEventListener("pointerup", ende);
   canvas.addEventListener("pointercancel", ende);
+  canvas.addEventListener("lostpointercapture", ende);
+  // iPad: Pencil-Berührungen nicht an Safari weitergeben (kein Markieren, kein Scrollen, keine Lupe)
+  for (const typ of ["touchstart", "touchmove", "touchend"]) {
+    canvas.addEventListener(typ, (e) => { if ([...e.changedTouches].some((t) => t.touchType === "stylus") || $("tr-finger").checked) e.preventDefault(); }, { passive: false });
+  }
+  dialog.addEventListener("selectstart", (e) => e.preventDefault());   // im Trainingsfenster nie Text markieren
+  dialog.addEventListener("contextmenu", (e) => e.preventDefault());
 
   const ergebnisZeigen = (an) => { $("tr-ergebnis").hidden = !an; $("tr-schreiben").hidden = an; };
   const zaehlerZeigen = () => {
@@ -248,8 +296,14 @@ export function trainingEinrichten({ daten, zaehlerAus, geaendert, teilen }) {
     return k;
   };
 
-  $("trainieren").addEventListener("click", () => { dialog.showModal(); neueVorlage(); zaehlerZeigen(); requestAnimationFrame(zeichnen); });
+  $("trainieren").addEventListener("click", () => {
+    dialog.showModal();
+    document.body.classList.add("training-offen");
+    getSelection()?.removeAllRanges();
+    neueVorlage(); zaehlerZeigen(); requestAnimationFrame(zeichnen);
+  });
   $("tr-schliessen").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => document.body.classList.remove("training-offen"));
   $("tr-zurueck").addEventListener("click", () => { striche.pop(); zeichnen(); });
   $("tr-leeren").addEventListener("click", () => { striche = []; zeichnen(); });
   $("tr-anderes").addEventListener("click", neueVorlage);
@@ -271,7 +325,7 @@ export function trainingEinrichten({ daten, zaehlerAus, geaendert, teilen }) {
   $("tr-speichern").addEventListener("click", () => {
     const eigene = eigeneLaden();
     let n = 0;
-    for (const t of ergebnis.teile) if (!t.aus) { (eigene[t.c] ??= []).push(t.glyphe); n++; }
+    for (const t of ergebnis.teile) if (!t.aus) { (eigene[t.c] ??= []).push({ ...t.glyphe, id: kennung(t.c, t.glyphe.striche) }); n++; }
     if (!eigeneSpeichern(eigene)) { $("tr-meldung").textContent = "Speichern ging nicht (Speicher voll oder privater Modus)."; return; }
     geaendert();
     zaehlerZeigen();
@@ -280,7 +334,7 @@ export function trainingEinrichten({ daten, zaehlerAus, geaendert, teilen }) {
   });
   $("tr-export").addEventListener("click", () => {
     const datei = new File([JSON.stringify({ version: 1, erstellt: new Date().toISOString(), glyphen: eigeneLaden() })],
-      "handschrift-training.json", { type: "application/json" });
+      `handschrift-training-${new Date().toISOString().slice(0, 10)}.json`, { type: "application/json" });
     teilen([datei]);
   });
   $("tr-loeschen").addEventListener("click", () => {
