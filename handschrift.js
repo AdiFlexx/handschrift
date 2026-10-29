@@ -30,11 +30,134 @@ const istGross = (c) => c !== c.toLowerCase() && c === c.toUpperCase();
 
 export function textAufbereiten(text) {
   return text
-    .replace(/^#+\s*|^>\s?/gm, "")                       // Markdown: Überschriften, Zitate
+    .replace(/\r/g, "")
+    .replace(/^>\s?/gm, "")                               // Markdown-Zitate
     .replace(/\*\*|__|`/g, "")                            // Fett/Code; „* “ als Stichpunkt bleibt
-    .replace(/"([^"]*)"/g, "„$1“")                        // gerade Anführungszeichen -> deutsche
-    .replace(/’/g, "'").replace(/[–—]/g, "-");
+    .replace(/"([^"$]*)"/g, "„$1“")                       // gerade Anführungszeichen -> deutsche
+    .replace(/’/g, "'").replace(/[–—](?=\s)/g, "-");
 }
+
+// --- Gliederung erkennen ----------------------------------------------------------------
+
+const PUNKT_MARKEN = "•·*◦▪▫●○■□";
+const STRICH_MARKEN = "-–—►▶→➔➜✓✔";
+
+// Stichpunkt aus einer Zeile lesen (auch aus Word/Notizen eingefügt): Ebene, Zeichenart, Text.
+export function stichpunktErkennen(zeile) {
+  const [, einzug, rest] = /^([ \t ]*)(.*)$/s.exec(zeile);
+  const ebene = Math.min(3, Math.floor(einzug.replace(/\t/g, "  ").replace(/ /g, " ").length / 2));
+  let r;
+  if ((r = /^([•·◦▪▫●○■□►▶→➔➜✓✔])\s*(\S.*)$/u.exec(rest))) return { ebene, marke: r[1], text: r[2] };
+  if ((r = /^([-–—*])\s+(\S.*)$/.exec(rest))) return { ebene, marke: r[1], text: r[2] };
+  if ((r = /^o\t+(\S.*)$/.exec(rest))) return { ebene, marke: "◦", text: r[1] };          // Word, 2. Ebene
+  if ((r = /^(\d{1,2}[.)]|[a-zA-Z]\)|[a-z]\.)\s+(\S.*)$/.exec(rest))) return { ebene, marke: r[1], text: r[2] };
+  return null;
+}
+
+// Überschrift: Markdown „# …“ oder kurze Zeile mit Doppelpunkt am Ende („Funktionen:“).
+export function ueberschriftErkennen(zeile) {
+  const t = zeile.trim();
+  const r = /^(#{1,3})\s+(.+)$/.exec(t);
+  if (r) return { text: r[2], stufe: r[1].length };
+  if (t.length <= 45 && /:$/.test(t) && !/[.!?;]/.test(t.slice(0, -1)) && t.split(/\s+/).length <= 6) return { text: t, stufe: 3 };
+  return null;
+}
+
+// --- Mathe ------------------------------------------------------------------------------
+
+const BEFEHLE = {
+  cdot: "·", times: "×", div: ":", pm: "±", le: "≤", leq: "≤", ge: "≥", geq: "≥", ne: "≠", neq: "≠",
+  approx: "≈", infty: "∞", to: "→", rightarrow: "→", Rightarrow: "⇒", degree: "°", circ: "°", in: "∈",
+  alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", lambda: "λ", mu: "μ", pi: "π",
+  sigma: "σ", phi: "φ", omega: "ω", Delta: "Δ", Sigma: "Σ", Omega: "Ω", cdots: "…", ldots: "…",
+};
+const OPERATOREN = new Set("=+-−×·:<>≤≥≠≈→⇒±∈");
+export const MATHE_ERKENNEN = /^\$.+\$$|[\^_]|\\(frac|sqrt|[a-zA-Z]+)|^sqrt\(/;
+
+// Kleine Formelsprache wie in LaTeX: x^2, a_1, \frac{1}{2}, \sqrt{x}, \pi … ; außerdem sqrt(x) und a/b.
+export function matheParsen(quelle) {
+  let i = 0;
+  const s = quelle.replace(/\*/g, "·").replace(/<=/g, "≤").replace(/>=/g, "≥").replace(/!=/g, "≠").replace(/->/g, "→");
+  const gruppe = () => {
+    if (s[i] === "{") {
+      i++;
+      const f = folge("}");
+      i++;
+      return f;
+    }
+    return atom();
+  };
+  const atom = () => {
+    const c = s[i];
+    if (c === "\\") {
+      const name = /^\\([a-zA-Z]+)/.exec(s.slice(i))?.[1] ?? "";
+      i += 1 + name.length;
+      if (name === "frac") { const z = gruppe(); return { t: "bruch", z, n: gruppe() }; }
+      if (name === "sqrt") return { t: "wurzel", inhalt: gruppe() };
+      if (!name) { i++; return { t: "zeichen", c: s[i - 1] }; }
+      return { t: "zeichen", c: BEFEHLE[name] ?? name };
+    }
+    if (s.startsWith("sqrt(", i)) {
+      i += 5;
+      const f = folge(")");
+      i++;
+      return { t: "wurzel", inhalt: f };
+    }
+    if (c === "(") {                                      // Klammern bleiben sichtbar, Inhalt als Gruppe
+      i++;
+      const f = folge(")");
+      i++;
+      return { t: "folge", kinder: [{ t: "zeichen", c: "(" }, f, { t: "zeichen", c: ")" }], klammer: f };
+    }
+    i++;
+    return { t: "zeichen", c };
+  };
+  const folge = (ende) => {
+    const kinder = [];
+    while (i < s.length && s[i] !== ende) {
+      if (s[i] === " ") { i++; continue; }
+      let a = atom();
+      while (s[i] === "^" || s[i] === "_") {
+        const art = s[i] === "^" ? "hoch" : "tief";
+        i++;
+        a = { t: art, basis: a, skript: gruppe() };
+      }
+      if (s[i] === "/") {                                 // a/b -> Bruch
+        i++;
+        let n = atom();
+        while (s[i] === "^" || s[i] === "_") { const art = s[i] === "^" ? "hoch" : "tief"; i++; n = { t: art, basis: n, skript: gruppe() }; }
+        const ohneKlammer = (x) => (x.klammer ? x.klammer : x);
+        a = { t: "bruch", z: ohneKlammer(a), n: ohneKlammer(n) };
+      }
+      kinder.push(a);
+    }
+    return { t: "folge", kinder };
+  };
+  return folge(undefined);
+}
+
+// Ersatzstriche für Zeichen, die (noch) nicht in der Handschrift-Bibliothek sind – leicht zittrig wie von Hand.
+const ERSATZ = {
+  "<": [[[0.75, -0.95], [0.05, -0.5], [0.75, -0.05]]],
+  ">": [[[0.05, -0.95], [0.75, -0.5], [0.05, -0.05]]],
+  "≤": [[[0.75, -1.15], [0.05, -0.7], [0.75, -0.25]], [[0.05, 0.05], [0.75, 0.05]]],
+  "≥": [[[0.05, -1.15], [0.75, -0.7], [0.05, -0.25]], [[0.05, 0.05], [0.75, 0.05]]],
+  "≈": [[[0, -0.62], [0.2, -0.75], [0.45, -0.6], [0.7, -0.72]], [[0, -0.3], [0.2, -0.43], [0.45, -0.28], [0.7, -0.4]]],
+  "→": [[[0, -0.5], [1.1, -0.5]], [[0.8, -0.75], [1.12, -0.5], [0.8, -0.25]]],
+  "⇒": [[[0, -0.62], [0.95, -0.62]], [[0, -0.32], [0.95, -0.32]], [[0.75, -0.9], [1.15, -0.47], [0.75, -0.05]]],
+  "∞": [[[0.55, -0.45], [0.35, -0.7], [0.1, -0.65], [0.05, -0.4], [0.25, -0.22], [0.55, -0.45], [0.85, -0.7],
+    [1.05, -0.62], [1.08, -0.35], [0.85, -0.2], [0.55, -0.45]]],
+  "π": [[[0, -0.82], [0.25, -0.95], [1.0, -0.98]], [[0.3, -0.95], [0.25, -0.45], [0.15, 0]], [[0.75, -0.97], [0.72, -0.3], [0.85, 0]]],
+  "°": [[[0.15, -1.6], [0.05, -1.45], [0.15, -1.3], [0.32, -1.38], [0.32, -1.55], [0.15, -1.6]]],
+  "±": [[[0.4, -1.0], [0.4, -0.35]], [[0.05, -0.68], [0.75, -0.68]], [[0.05, 0], [0.75, 0]]],
+  "×": [[[0.1, -0.85], [0.7, -0.15]], [[0.7, -0.85], [0.1, -0.15]]],
+  "≠": [[[0, -0.62], [0.8, -0.62]], [[0, -0.3], [0.8, -0.3]], [[0.6, -0.95], [0.2, 0.02]]],
+  "=": [[[0, -0.62], [0.8, -0.62]], [[0, -0.3], [0.8, -0.3]]],
+  "α": [[[0.95, -0.95], [0.7, -0.4], [0.45, -0.05], [0.15, -0.1], [0.05, -0.5], [0.3, -0.9], [0.6, -0.7], [0.75, -0.25], [0.95, 0]]],
+  "∈": [[[0.75, -0.9], [0.3, -0.85], [0.05, -0.5], [0.3, -0.12], [0.75, -0.1]], [[0.1, -0.5], [0.65, -0.5]]],
+  "Δ": [[[0.5, -1.8], [0.02, 0], [0.98, 0], [0.5, -1.8]]],
+  "…": [[[0.1, -0.05], [0.12, -0.03]], [[0.5, -0.05], [0.52, -0.03]], [[0.9, -0.05], [0.92, -0.03]]],
+};
 
 // --- Satz ---------------------------------------------------------------------------
 
@@ -130,14 +253,14 @@ export class Handschrift {
 
   aufzaehlungszeichen(zeichen) {
     const mitte = -0.4 * this.versal;                    // mittig in der Zeile: halbe Großbuchstabenhöhe
-    if ("-–".includes(zeichen)) {
+    if (STRICH_MARKEN.includes(zeichen)) {
       const g = this.variante("-");
       if (g) {
         const strich = Handschrift.mittig(g, this.zufall.gauss(1.25, 0.1), mitte);
         return [[[0, strich, 1.0, this.zufall.gauss(0, 0.03)]], strich.breite];
       }
     }
-    if ("•·*".includes(zeichen)) {
+    if (PUNKT_MARKEN.includes(zeichen)) {
       const g = this.variante("·") || this.variante(".");
       if (g) {
         const p = Handschrift.mittig(g, null, mitte);
