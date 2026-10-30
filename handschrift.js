@@ -1262,12 +1262,100 @@ export function zipStored(eintraege) {
 
 const ausBase64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
+// --- Vorlage anpassen -------------------------------------------------------------------
+// Alle Papiere einer Größe stammen aus derselben GoodNotes-Datei: gleiche Dokument-, Seiten-, Papier- und
+// Anhangskennungen und dieselbe GoodNotes-Vorlage (z. B. „…_a4_1_2 - White“ samt Linienbeschreibung) – nur die
+// beigelegte PDF unterscheidet sich. GoodNotes zeichnet dann seine Vorlage bzw. das schon bekannte Papier statt
+// unserer PDF. Darum fliegt die Vorlage raus (Hintergrund = PDF wie bei einer importierten PDF-Seite), der Anhang
+// bekommt seine echte Größe und jede Datei frische Kennungen.
+
+const VORLAGE_FELDER = [7, 9, 12, 18];                   // Papier-Ereignis: Linienabstand, Vorlagen-ID, Linienbild
+const KENNUNG = /[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{11}/g;   // UUID ohne letzte Stelle
+
+function varintLesen(b, i) {
+  let n = 0, faktor = 1;
+  for (;;) {
+    const x = b[i++];
+    n += (x & 0x7f) * faktor;
+    faktor *= 128;
+    if (!(x & 0x80)) return [n, i];
+  }
+}
+
+// Felder einer Protobuf-Nachricht: Feldnummer, Inhalt (nur Typ 2) und die Rohbytes des ganzen Felds.
+function protoFelder(b) {
+  const felder = [];
+  for (let i = 0; i < b.length;) {
+    const start = i;
+    let kopf, n, wert = null;
+    [kopf, i] = varintLesen(b, i);
+    const typ = kopf & 7;
+    if (typ === 0) [, i] = varintLesen(b, i);
+    else if (typ === 1) i += 8;
+    else if (typ === 5) i += 4;
+    else if (typ === 2) { [n, i] = varintLesen(b, i); wert = b.subarray(i, i + n); i += n; }
+    else throw new Error(`Unbekannter Protobuf-Typ ${typ}`);
+    felder.push({ feld: kopf >>> 3, wert, roh: b.subarray(start, i) });
+  }
+  return felder;
+}
+
+function datensaetze(b) {
+  const liste = [];
+  for (let i = 0; i < b.length;) {
+    let n;
+    [n, i] = varintLesen(b, i);
+    liste.push(b.subarray(i, i + n));
+    i += n;
+  }
+  return liste;
+}
+
+// Kennungen des Dokuments selbst (Schlüssel der Einträge, Ereignis-IDs in Feld 11, Striche der Probe in Feld 15),
+// nicht die Verweise auf GoodNotes-Kataloge (Cover, Standardpapier).
+// Ersetzt wird je UUID ohne letzte Stelle, damit Paare wie Seite …CC/…CD zusammenbleiben.
+function frischeKennungen(ereignisse) {
+  const karte = new Map();
+  const merken = (b) => { const alt = String.fromCharCode(...b).slice(0, 35); if (!karte.has(alt)) karte.set(alt, uuid().slice(0, 35)); };
+  for (const satz of datensaetze(ereignisse)) {
+    const [schluessel, inhalt] = protoFelder(satz);
+    merken(schluessel.wert);
+    for (const f of protoFelder(inhalt.wert)) if ((f.feld === 11 || f.feld === 15) && f.wert?.length === 36) merken(f.wert);
+  }
+  return karte;
+}
+
+function kennungenTauschen(daten, karte) {
+  const aus = daten.slice();
+  for (let i = 0; i + 36 <= aus.length; i++) {
+    if (aus[i + 8] !== 45 || aus[i + 13] !== 45 || aus[i + 18] !== 45 || aus[i + 23] !== 45) continue;   // 45 = „-“
+    const neu = karte.get(String.fromCharCode(...aus.subarray(i, i + 35)));
+    if (neu) { aus.set(enc.encode(neu), i); i += 35; }
+  }
+  return aus;
+}
+
+// Papier-Ereignis (2) ohne GoodNotes-Vorlage, Anhang-Ereignis (6) mit der echten Größe der PDF.
+function ereignisseAnpassen(ereignisse, anhangGroesse) {
+  const umbau = {
+    2: (felder) => felder.filter((g) => !VORLAGE_FELDER.includes(g.feld)).map((g) => g.roh),
+    6: (felder) => felder.map((g) => (g.feld === 5 ? fV(5, anhangGroesse) : g.roh)),
+  };
+  return verbinden(datensaetze(ereignisse).map((satz) => datensatz(verbinden(protoFelder(satz).map((f) =>
+    umbau[f.feld] ? fB(f.feld, verbinden(umbau[f.feld](protoFelder(f.wert)))) : f.roh)))));
+}
+
 // Einseitige .goodnotes-Datei: Papier und Index der Vorlage, Striche/Suchindex/Vorschaubild neu.
 export function goodnotesDatei(striche, papier, vorschauJpeg = null) {
+  const vorlage = new Map(papier.eintraege.map(([name, b64]) => [name, ausBase64(b64)]));
+  const karte = frischeKennungen(vorlage.get("index.events.pb"));
+  const anhang = [...vorlage.keys()].find((name) => name.startsWith("attachments/"));
   const neu = { [`notes/${papier.seite}`]: notizStream(striche), [`search/${papier.seite}`]: SUCH_STUB };
   const eintraege = [];
-  for (const [name, b64] of papier.eintraege) {
-    eintraege.push([name, neu[name] ?? ausBase64(b64)]);
+  for (const [name, daten] of vorlage) {
+    let inhalt = neu[name] ?? kennungenTauschen(daten, karte);
+    if (name === "index.events.pb") inhalt = ereignisseAnpassen(inhalt, vorlage.get(anhang).length);
+    eintraege.push([name.replace(KENNUNG, (k) => karte.get(k) ?? k), inhalt]);
     if (name === "index.events.pb" && vorschauJpeg) eintraege.push(["thumbnail.jpg", vorschauJpeg]);
   }
   return zipStored(eintraege);
