@@ -1,6 +1,6 @@
-import { Handschrift, goodnotesDatei, VOREINSTELLUNGEN, GLIEDERUNG, LAYOUTS, anweisungenLesen, anweisungenAnwenden } from "./handschrift.js";
-import { trainingEinrichten, eigeneLaden, mitEigenen } from "./training.js";
-import { REGELBLATT } from "./regelblatt.js";
+import { Handschrift, goodnotesDatei, VOREINSTELLUNGEN, GLIEDERUNG, LAYOUTS, anweisungenLesen, anweisungenAnwenden } from "./handschrift.js?v=20261030";
+import { trainingEinrichten, eigeneLaden, mitEigenen } from "./training.js?v=20261030";
+import { REGELBLATT } from "./regelblatt.js?v=20261030";
 
 const $ = (id) => document.getElementById(id);
 const SPEICHER = { schluessel: "handschrift-schluessel", entwurf: "handschrift-entwurf" };
