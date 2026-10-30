@@ -151,6 +151,9 @@ input:focus, textarea:focus { border-color: var(--akzent); box-shadow: 0 0 0 3px
 .titel { font-family: var(--serif); font-size: 19px !important; font-weight: 600; background: transparent !important; border-color: transparent !important; padding: 6px 4px !important; }
 .titel:focus { border-color: var(--akzent) !important; }
 textarea { flex: 1; min-height: 300px; resize: vertical; line-height: 1.6; }
+.text-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; }
+.text-knoepfe .knopf { min-height: 40px; padding: 6px 14px; font-weight: 500; }
+.text-knoepfe svg { width: 18px; height: 18px; }
 
 /* --- Knöpfe --- */
 .knopf {

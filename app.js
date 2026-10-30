@@ -126,6 +126,11 @@ function oeffnen(daten) {
   let warten;
   const beimTippen = () => { clearTimeout(warten); warten = setTimeout(neuSetzen, 350); };
   $("text").addEventListener("input", beimTippen);
+  $("text").addEventListener("input", () => { geloescht = null; textKnoepfeZeigen(); });
+  $("einfuegen").addEventListener("click", einfuegen);
+  $("leeren").addEventListener("click", () => textSetzen("", $("text").value));
+  $("zurueckholen").addEventListener("click", () => textSetzen(geloescht));
+  textKnoepfeZeigen();
   $("titel").addEventListener("input", entwurfSichern);
   $("wuerfeln").addEventListener("click", () => { zustand.seed = neuerSeed(); neuSetzen(); });
   $("zurueck").addEventListener("click", () => blaettern(-1));
@@ -148,6 +153,38 @@ function oeffnen(daten) {
   });
   addEventListener("resize", () => zeichnen());
   neuSetzen();
+}
+
+// --- Textfeld: Einfügen, Alles löschen (mit Wiederherstellen bis zur nächsten Eingabe) ----
+
+let geloescht = null;
+
+function textKnoepfeZeigen() {
+  $("leeren").hidden = geloescht !== null;
+  $("zurueckholen").hidden = geloescht === null;
+  $("leeren").disabled = !$("text").value;
+}
+
+function textSetzen(wert, merken = null) {
+  $("text").value = wert;
+  $("text").dispatchEvent(new Event("input"));           // Vorschau und Entwurf wie beim Tippen
+  geloescht = merken;
+  textKnoepfeZeigen();
+}
+
+async function einfuegen() {
+  const feld = $("text");
+  let text;
+  try {
+    text = (await navigator.clipboard.readText()).replace(/\r\n?/g, "\n");
+  } catch {
+    feld.focus();
+    return status("Einfügen ging nicht – bitte lange ins Textfeld tippen und „Einfügen“ wählen.", true);
+  }
+  if (!text) return status("Die Zwischenablage ist leer.", true);
+  const { selectionStart: a, selectionEnd: b, value } = feld;
+  textSetzen(value.slice(0, a) + text + value.slice(b));
+  feld.setSelectionRange(a + text.length, a + text.length);
 }
 
 function passendesPreset() {

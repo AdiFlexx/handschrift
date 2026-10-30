@@ -144,6 +144,17 @@
     <main class="werkbank">
       <section class="eingabe karte" aria-label="Text">
         <input id="titel" class="titel" type="text" placeholder="Dateiname, z. B. Mathe – ABC-Formel" enterkeyhint="next" aria-label="Dateiname">
+        <div class="text-knoepfe">
+          <button id="einfuegen" class="knopf" type="button" title="Text aus der Zwischenablage an der Schreibmarke einfügen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1.5"/><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg>
+            Einfügen</button>
+          <button id="leeren" class="knopf" type="button" title="Den ganzen Text im Textfeld löschen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>
+            Alles löschen</button>
+          <button id="zurueckholen" class="knopf" type="button" title="Den eben gelöschten Text wiederherstellen" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+            Wiederherstellen</button>
+        </div>
         <textarea id="text" spellcheck="true" placeholder="Text hier einfügen oder tippen …" aria-label="Text"></textarea>
         <details class="tipps">
           <summary>So formatierst du</summary>
