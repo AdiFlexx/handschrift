@@ -1,12 +1,12 @@
-import { Handschrift, goodnotesDatei, VOREINSTELLUNGEN, GLIEDERUNG, LAYOUTS, anweisungenLesen, anweisungenAnwenden } from "./handschrift.js?v=20261030";
-import { trainingEinrichten, eigeneLaden, mitEigenen } from "./training.js?v=20261030";
-import { REGELBLATT } from "./regelblatt.js?v=20261030";
+import { Handschrift, goodnotesDatei, VOREINSTELLUNGEN, GLIEDERUNG, NATUR, LAYOUTS, anweisungenLesen, anweisungenAnwenden } from "./handschrift.js?v=20261117";
+import { trainingEinrichten, eigeneLaden, mitEigenen } from "./training.js?v=20261117";
+import { REGELBLATT } from "./regelblatt.js?v=20261117";
 
 const $ = (id) => document.getElementById(id);
 const SPEICHER = { schluessel: "handschrift-schluessel", entwurf: "handschrift-entwurf" };
 const TINTE = "#15181f";
 
-const zustand = { daten: null, art: "kariert-klein", format: "A4", preset: "normal", optionen: { ...VOREINSTELLUNGEN.normal, ...GLIEDERUNG },
+const zustand = { daten: null, art: "kariert-klein", format: "A4", preset: "normal", optionen: { ...VOREINSTELLUNGEN.normal, ...GLIEDERUNG, ...NATUR },
                   seed: neuerSeed(), seiten: [], seite: 0, papier: null };
 const bilder = new Map();                                // Papierhintergründe, einmal geladen
 
@@ -80,7 +80,7 @@ function oeffnen(daten) {
   const entwurf = lies(SPEICHER.entwurf, {});
   zustand.art = entwurf.art ?? zustand.art;
   zustand.format = entwurf.format ?? zustand.format;
-  zustand.optionen = { ...VOREINSTELLUNGEN.normal, ...GLIEDERUNG, ...(entwurf.optionen ?? {}) };
+  zustand.optionen = { ...VOREINSTELLUNGEN.normal, ...GLIEDERUNG, ...NATUR, ...(entwurf.optionen ?? {}) };
   zustand.preset = passendesPreset();
   for (const feld of document.querySelectorAll("[data-option]")) {       // Einzel-Einstellungen
     feld.addEventListener("input", () => {
@@ -207,6 +207,8 @@ function einstellungenZeigen() {
   }
   for (const a of document.querySelectorAll("[data-anzeige]")) a.textContent = `${Math.round(zustand.optionen[a.dataset.anzeige] * 100)} %`;
   $("gliederung-regeln").disabled = !zustand.optionen.gliedern;
+  $("unruhe-regler").classList.toggle("aus", !zustand.optionen.unregelmaessig);
+  $("unruhe-regler").querySelector("input").disabled = !zustand.optionen.unregelmaessig;
   const name = `${zustand.art}_${zustand.format}`;
   zustand.papier = zustand.daten.papiere.find((p) => p.name === name) ?? zustand.daten.papiere[0];
 }

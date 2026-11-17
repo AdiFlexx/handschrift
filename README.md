@@ -8,6 +8,9 @@ gemacht fürs iPad: Text einfügen, Papier wählen (kariert, liniert schmal/gro�
 - Die Buchstaben-Bibliothek und die Papiervorlagen liegen verschlüsselt in `daten.bin` (AES-GCM, PBKDF2) –
   ohne Passwort ist die Seite nutzlos.
 - Stichpunkte: `- Punkt`, `* Punkt`, `1. Punkt`; zwei Leerzeichen davor = Unterpunkt.
+- „Natürlich unregelmäßig“ (Anpassen → Schrift): Zeilen laufen leicht schräg, Wörter sitzen mal höher/tiefer,
+  sind mal größer/kleiner, Wortabstände und Zeilenanfang schwanken – Stärke 25–200 %, gemessen an echten Mitschriften.
+  Ausgeschaltet ist die Schrift genau so gleichmäßig wie vorher (gleicher Würfel = gleiche Seite).
 
 Das GoodNotes-Dateiformat ist nicht offiziell dokumentiert. Der Writer folgt
 [InkLift](https://github.com/yellowHatpro/InkLift) (MIT), das Einlesen der Proben

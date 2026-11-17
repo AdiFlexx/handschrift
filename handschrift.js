@@ -64,8 +64,9 @@ export function ueberschriftErkennen(zeile) {
   return null;
 }
 
-// Anweisungen am Textanfang (für KI): @papier, @format, @platz, @layout, @groesse, @wortabstand, @gliedern, @unterstreichen, @titel
-const ANWEISUNG = /^\s*@(papier|format|platz|layout|groesse|größe|wortabstand|buchstabenabstand|gliedern|unterstreichen|titel|zeilen)\s*:\s*(.+?)\s*$/i;
+// Anweisungen am Textanfang (für KI): @papier, @format, @platz, @layout, @groesse, @wortabstand, @gliedern, @unterstreichen,
+// @unregelmaessig, @titel
+const ANWEISUNG = /^\s*@(papier|format|platz|layout|groesse|größe|wortabstand|buchstabenabstand|gliedern|unterstreichen|unregelmaessig|unregelmäßig|titel|zeilen)\s*:\s*(.+?)\s*$/i;
 
 export function anweisungenLesen(text) {
   const anweisungen = {};
@@ -73,7 +74,7 @@ export function anweisungenLesen(text) {
   let i = 0;
   while (i < zeilen.length && (ANWEISUNG.test(zeilen[i]) || (!zeilen[i].trim() && Object.keys(anweisungen).length))) {
     const m = ANWEISUNG.exec(zeilen[i]);
-    if (m) anweisungen[m[1].toLowerCase().replace("größe", "groesse")] = m[2];
+    if (m) anweisungen[m[1].toLowerCase().replace("größe", "groesse").replace("unregelmäßig", "unregelmaessig")] = m[2];
     i++;
   }
   return { anweisungen, text: Object.keys(anweisungen).length ? zeilen.slice(i).join("\n") : text };
@@ -99,6 +100,11 @@ export function anweisungenAnwenden(anweisungen, basis) {
     if (n != null) aus.optionen[k] = Math.min(max, Math.max(min, n));
   }
   for (const k of ["gliedern", "unterstreichen"]) if (a[k] != null && janein(a[k]) != null) aus.optionen[k] = janein(a[k]);
+  if (a.unregelmaessig != null) {                        // an | aus | 50% … 200%
+    const an = janein(a.unregelmaessig), n = an == null ? zahl(a.unregelmaessig) : null;
+    if (an != null) aus.optionen.unregelmaessig = an;
+    else if (n != null) Object.assign(aus.optionen, { unregelmaessig: n > 0, unruhe: n > 0 ? Math.min(2, Math.max(0.25, n)) : aus.optionen.unruhe });
+  }
   if (/^(2|jede zweite)/i.test(a.zeilen ?? "")) aus.optionen.zeilenSprung = 2;
   if (/^(1|jede)$/i.test(a.zeilen ?? "")) aus.optionen.zeilenSprung = 1;
   if (a.titel) aus.titel = a.titel;
@@ -345,6 +351,9 @@ export class Handschrift {
     this.p = daten.profil;
     this.glyphen = daten.glyphen;
     this.zufall = new Zufall(seed);
+    // Eigener Zufall für die Unregelmäßigkeit: ausgeschaltet bleibt die Schrift Strich für Strich wie bisher.
+    this.unruhZufall = new Zufall(seed == null ? null : seed + 7919);
+    this.unruhe = 0;
     this.zuletzt = {};
     this.fehlend = new Set();
     this.punkte = this.umlautpunkte();
@@ -422,10 +431,11 @@ export class Handschrift {
       if (c === "−") c = "-";
       let g = !this.glyphen[c] && !UMLAUTE[c] && ERSATZ[c] ? this.ersatz(c) : this.variante(c === "–" ? "-" : c);
       if (!g) continue;
-      if (teile.length) x += Math.max(0.12, this.zufall.gauss(this.p.luecke, 0.25 * this.p.luecke_streuung)) * (this.buchstabenabstand ?? 1);
+      const u = this.unruhe;                             // Unruhe: Buchstaben streuen etwas mehr (gemessen an echten Seiten)
+      if (teile.length) x += Math.max(0.12, this.zufall.gauss(this.p.luecke, 0.25 * this.p.luecke_streuung * (1 + 0.6 * u))) * (this.buchstabenabstand ?? 1);
       let faktor = VERSALHOCH.has(c) ? this.versal / Handschrift.hoehe(g) : 1.0;   // einheitliche Ziffernhöhe
-      let skala = faktor * this.zufall.gauss(1.0, 0.04);
-      let dy = this.zufall.gauss(0.0, 0.05);
+      let skala = faktor * this.zufall.gauss(1.0, 0.04 * (1 + 0.8 * u));
+      let dy = this.zufall.gauss(0.0, 0.05 * (1 + 0.9 * u));
       if (/[0-9]/.test(c)) dy -= Math.max(...g.striche.flatMap((s) => s.map(([, y]) => y))) * skala;
       if (hoch) {
         faktor *= 0.55;
@@ -589,14 +599,25 @@ export class Handschrift {
   // Phase 1 baut die Zeilen (Umbruch, Stichpunkte, Formeln, Regeln aus dem Regelblatt) in ihrer Bahn des Layouts,
   // Phase 2 legt jede Zeile auf die nächste Linie, auf der sie nichts berührt – so überlappt nie etwas.
   setzen(text, papier, optionen = {}) {
-    const o = { ...VOREINSTELLUNGEN.normal, ...GLIEDERUNG, ...optionen };
+    const o = { ...VOREINSTELLUNGEN.normal, ...GLIEDERUNG, ...NATUR, ...optionen };
     this.buchstabenabstand = o.buchstabenabstand;
+    const u = o.unregelmaessig ? Math.max(0, Number(o.unruhe) || 0) : 0;   // 0 = so gleichmäßig wie bisher
+    this.unruhe = u;
     const xh = this.schriftgroesse(papier) * o.groesse;
     const oben = Math.max(36.0, this.versal * xh + 14);
     const linien = papier.linien.filter((y) => y >= oben && y <= papier.hoehe - 2.2 * xh);
     const wortabst = Math.min(Math.max(this.p.wortabstand, 1.5), 3.5) * o.wortabstand;
     const breite = this.p.strichbreite_pt;
     const B = layoutBahnen(o.layout, papier);
+    const tinte = (teile, neig) => {                    // linker/rechter Tintenrand eines Worts in x-Höhen, mit Schräglage
+      let a = Infinity, b = -Infinity;
+      for (const [gx, g, skala] of teile) for (const st of g.striche) for (const [px, py] of st) {
+        const v = gx + skala * (px - py * neig);
+        if (v < a) a = v;
+        if (v > b) b = v;
+      }
+      return [a, b];
+    };
     const skaliert = (teile, f) => teile.map(([gx, g, s, d]) => [gx * f, g, s * f, d * f]);
     // Handgezogene Linie; „weg“ = +1: liegt nie höher als y (Unterstrich), -1: nie tiefer als y (Rahmen-Oberkante).
     const handLinie = (x0, x1, y, zittern = 0.04, weg = 0, neig = this.zufall.gauss(0, 0.006)) => {
@@ -610,6 +631,16 @@ export class Handschrift {
       const neig = this.zufall.gauss(0, 0.004);
       return [handLinie(x0, x1, y, 0.03, 1, neig), handLinie(x0 + 0.1 * xh, x1 - 0.05 * xh, y + 0.42 * xh, 0.03, 1, neig)];
     };
+    // Unregelmäßigkeit wie auf echten Seiten (gemessen an Mitschriften): jede Zeile läuft etwas schräg und ist
+    // etwas größer oder kleiner, jedes Wort sitzt etwas höher oder tiefer, ist etwas größer oder kleiner,
+    // die Wortabstände schwanken deutlich, der Zeilenanfang wandert. Eigener Zufall – ohne Unruhe bleibt alles wie bisher.
+    const uz = this.unruhZufall, grenze = (v, a) => Math.max(-a, Math.min(a, v));
+    const zeilenStil = () => (u ? {
+      schraeg: Math.tan(grenze(uz.gauss(0.1 * u, 0.22 * u), 1.0) * Math.PI / 180),   // leicht nach rechts unten
+      dy: grenze(uz.gauss(0, 0.05 * u), 0.15),
+      groesse: Math.exp(grenze(uz.gauss(0, 0.03 * u), 0.08)),
+      einzug: grenze(uz.gauss(0.1 * u, 0.35 * u), 1.0) * xh,
+    } : { schraeg: 0, dy: 0, groesse: 1, einzug: 0 });
     const senkrecht = (x, y0, y1) => {                   // Rand, Spaltentrenner, Strich vor Nebenrechnungen
       const n = Math.max(2, Math.round((y1 - y0) / (1.5 * xh))), schief = this.zufall.gauss(0, 0.001) * (y1 - y0);
       return Array.from({ length: n + 1 }, (_, i) => [x + schief * (i / n - 0.5) + this.zufall.gauss(0, 0.012 * xh), y0 + (y1 - y0) * i / n]);
@@ -651,21 +682,24 @@ export class Handschrift {
       // Steht rechts noch etwas (Strich, Spalte, Rand): Platz für die Schräglage der Großbuchstaben lassen
       const ueberhang = bx1 < papier.x_rechts - 1 ? (this.versal * groesse * this.p.neigung_tan + 0.6) * xh : 0;
       const linksRand = bx0 + rand, rechtsRand = bx1 - rand - ueberhang;
-      const start = linksRand + this.zufall.uniform(-1.0, 1.5);
+      let stil = zeilenStil();
+      const start = linksRand + this.zufall.uniform(-1.0, 1.5) + stil.einzug;
       const neueZeile = () => ({ frei: 0, kasten, bahn: p.bahn, x0: bx0, x1: bx1, rechts: rechtsRand, teile: [], linien: [] });
       let zeile = { ...neueZeile(), frei: neben ? 0 : frei, anker: p.anker };
       if (!neben) frei = 0;                              // freie Linien gelten der Hauptspalte, nicht der Nebenrechnung
       const anfang = zeilen.length;
       let x = start, links = start, drift = 0.0, zeilenAnfang = x, xEnde = x, markiert = false, markStart = null;
+      let tinteBis = -Infinity, vorGroesse = 1;          // rechter Tintenrand und Größe des vorigen Worts (nur mit Unruhe)
       const unterkante = () => Math.max(0.3, (zeile.tief ?? 0) + 0.2) * xh + breite + 0.6;   // unter die tiefste Unterlänge
+      const schief = (l) => l.map(([px, py]) => [px, py + stil.schraeg * (px - zeilenAnfang)]);   // Striche laufen mit der Zeile
       const markEnde = (bis) => {                        // ==Markierung== wird unterstrichen
-        if (markStart !== null) zeile.linien.push(handLinie(markStart - 0.15 * xh, bis + 0.15 * xh, unterkante(), 0.04, 1));
+        if (markStart !== null) zeile.linien.push(schief(handLinie(markStart - 0.15 * xh, bis + 0.15 * xh, unterkante(), 0.04, 1)));
         markStart = null;
       };
       const zeileFertig = () => {
         markEnde(xEnde);
-        if (ue && o.unterstreichen && ue.stufe <= 2) zeile.linien.push(handLinie(zeilenAnfang - 0.2 * xh, xEnde + 0.3 * xh, unterkante(), 0.04, 1));
-        if (p.ergebnis && zeile.teile.length) zeile.linien.push(...doppelt(zeilenAnfang - 0.15 * xh, xEnde + 0.25 * xh, unterkante()));
+        if (ue && o.unterstreichen && ue.stufe <= 2) zeile.linien.push(schief(handLinie(zeilenAnfang - 0.2 * xh, xEnde + 0.3 * xh, unterkante(), 0.04, 1)));
+        if (p.ergebnis && zeile.teile.length) zeile.linien.push(...doppelt(zeilenAnfang - 0.15 * xh, xEnde + 0.25 * xh, unterkante()).map(schief));
         if (ausrichtung) {                               // [mitte] / [rechts] / $$…$$
           const frei2 = rechtsRand - (xEnde - zeilenAnfang) - linksRand;
           const dx = (ausrichtung === "mitte" ? frei2 / 2 : frei2) - (zeilenAnfang - linksRand);
@@ -679,7 +713,7 @@ export class Handschrift {
       if (sp) {                                          // Spiegelstrich davor, Folgezeilen bündig eingerückt
         x = start + sp.ebene * 3.2 * xh;
         const [teile, w] = this.aufzaehlungszeichen(sp.marke);
-        zeile.teile.push({ x, teile, drift: 0, neigung: this.p.neigung_tan, id: ++idNr });
+        zeile.teile.push({ x, teile, drift: stil.dy, neigung: this.p.neigung_tan, id: ++idNr });
         x = links = zeilenAnfang = xEnde = x + (w + 1.4) * xh;
       }
       const absatz = ue ? ue.text : sp ? sp.text : roh.trim();
@@ -695,24 +729,40 @@ export class Handschrift {
         if (stuecke[0][1] > platz) stuecke = this.passendMachen(tok, stuecke[0], platz);
         for (let [teile, w] of stuecke) {
           if (!teile.length) continue;
-          if (groesse !== 1) { teile = skaliert(teile, groesse); w *= groesse; }
+          const wortGroesse = u ? stil.groesse * Math.exp(grenze(uz.gauss(0, 0.12 * u), 0.25)) : 1;
+          const wortDy = u ? stil.dy + grenze(uz.gauss(0, 0.2 * u), 0.5) : 0;
+          if (groesse * wortGroesse !== 1) { teile = skaliert(teile, groesse * wortGroesse); w *= groesse * wortGroesse; }
+          if (u && x > links) {                          // schräge, größere Buchstaben ragen über ihre Breite: Wörter nie zusammenkleben
+            const fehlt = tinteBis + 1.4 * xh * Math.max(vorGroesse, wortGroesse) - (x + tinte(teile, this.p.neigung_tan)[0] * xh);
+            if (fehlt > 0) x += fehlt;
+          }
           if (x > links && x + w * xh > rechtsRand) {    // Umbruch
             zeileFertig();
             zeile = neueZeile();
-            x = links = sp ? links : linksRand + this.zufall.uniform(-1.0, 1.5);
+            stil = zeilenStil();
+            tinteBis = -Infinity;
+            x = links = sp ? links : linksRand + this.zufall.uniform(-1.0, 1.5) + stil.einzug;
             zeilenAnfang = x;
             drift = 0.0;
           }
-          const neigung = this.p.neigung_tan + this.zufall.gauss(0, 0.03);
+          const neigung = this.p.neigung_tan + this.zufall.gauss(0, 0.03 * (1 + 0.5 * u));
           drift = Math.max(-0.08, Math.min(0.08, drift + this.zufall.gauss(0, 0.03)));   // bleibt auf der Linie
+          const lage = drift + wortDy;                   // Höhe des Worts; dazu läuft die Zeile schräg
+          const schraeg = stil.schraeg * (x - zeilenAnfang) / xh;
           if (zeile.gleichX == null && /^[=≈]$/.test(tok)) zeile.gleichX = x;           // für bündige Rechenschritte
           if (zeile.strichAb == null && tok === "|") zeile.strichAb = zeile.teile.length;
-          zeile.teile.push({ x, teile, drift, neigung, id: ++idNr });
-          zeile.tief = Math.max(zeile.tief ?? 0, Handschrift.boxAus(teile, w).unten + Math.abs(drift));
+          zeile.teile.push({ x, teile, drift: lage + schraeg, neigung, id: ++idNr });
+          if (u) { tinteBis = x + tinte(teile, neigung)[1] * xh; vorGroesse = wortGroesse; }
+          zeile.tief = Math.max(zeile.tief ?? 0, Handschrift.boxAus(teile, w).unten + Math.abs(lage));
           if (markiertHier && markStart === null) markStart = x;
           if (!markiertHier) markEnde(xEnde);
           xEnde = x + w * xh;
-          x += (w + (neben ? 0.7 : 1) * Math.max(1.0, this.zufall.gauss(wortabst, 0.35))) * xh;   // Nebenrechnung enger
+          let luecke = Math.max(1.0, this.zufall.gauss(wortabst, 0.35));
+          if (u) {                                       // mal weit, seltener eng – nie so eng, dass Wörter zusammenlaufen
+            const z = grenze(uz.gauss(0.05, 0.4 * u), 1.1);
+            luecke = Math.min(3 * wortabst, Math.max(1.5, 0.6 * wortabst, luecke * Math.exp(z < 0 ? 0.5 * z : z)));
+          }
+          x += (w + (neben ? 0.7 : 1) * luecke * wortGroesse) * xh;   // Nebenrechnung enger; große Wörter mit mehr Luft
         }
       }
       zeileFertig();
@@ -956,6 +1006,10 @@ export const VOREINSTELLUNGEN = {
   luftig: { abstandStichpunkte: true, abstandUeberschrift: true, unterstreichen: true, zeilenSprung: 2, groesse: 1.0,
             wortabstand: 1.15, buchstabenabstand: 1.05 },
 };
+
+// Natürliche Unregelmäßigkeit – unabhängig vom Platz-Preset. unruhe 1 = so unruhig wie echte Mitschriften,
+// 0,25 = kaum, 2 = doppelt so stark; unregelmaessig: false = gleichmäßig wie früher.
+export const NATUR = { unregelmaessig: true, unruhe: 1.0 };
 
 // Layout und Gliederung – unabhängig vom Platz-Preset. Die gl_*-Regeln wirken nur, wenn „gliedern“ an ist.
 export const GLIEDERUNG = {

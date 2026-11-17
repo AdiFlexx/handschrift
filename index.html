@@ -14,8 +14,8 @@
   <link rel="icon" href="icon-180.png">
   <link rel="manifest" href="manifest.webmanifest">
   <!-- ?v= bei jeder Änderung an JS/CSS erhöhen (auch bei den Imports in app.js), sonst mischt der Cache alte und neue Dateien -->
-  <link rel="stylesheet" href="style.css?v=20261030">
-  <script type="module" src="app.js?v=20261030"></script>
+  <link rel="stylesheet" href="style.css?v=20261117">
+  <script type="module" src="app.js?v=20261117"></script>
 </head>
 <body>
   <div id="sperre" class="sperre">
@@ -133,6 +133,9 @@
       </div>
       <div class="spalte">
         <span class="etikett">Schrift</span>
+        <label class="schalter"><input data-option="unregelmaessig" type="checkbox"><span></span><em class="text">Natürlich unregelmäßig<small>Höhe, Größe, Abstände und Zeilen schwanken wie von Hand</small></em></label>
+        <label class="regler" id="unruhe-regler">Unregelmäßigkeit <output data-anzeige="unruhe"></output>
+          <input data-option="unruhe" type="range" min="0.25" max="2" step="0.05"></label>
         <label class="regler">Größe <output data-anzeige="groesse"></output>
           <input data-option="groesse" type="range" min="0.8" max="1.25" step="0.05"></label>
         <label class="regler">Wortabstand <output data-anzeige="wortabstand"></output>

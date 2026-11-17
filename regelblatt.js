@@ -10,6 +10,7 @@ export const REGELBLATT = `Du formatierst Texte für „Handschrift“ – eine 
    @zeilen: jede | jede zweite
    @groesse: 80% … 125%        (Schriftgröße)
    @wortabstand: 70% … 150%
+   @unregelmaessig: an | aus | 50% … 200%   (Schrift schwankt natürlich wie von Hand; Standard: an, 100%)
    @unterstreichen: an | aus   (Überschriften unterstreichen)
    @gliedern: an | aus         (feste Regeln: Überschriften, Stichpunkte, Merke-Kästen … – meist „aus“, wenn du selbst gliederst)
    @titel: Dateiname
